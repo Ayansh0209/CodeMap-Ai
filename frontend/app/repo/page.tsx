@@ -142,9 +142,11 @@ function RepoPageContent() {
   const [isIssueLoading, setIsIssueLoading] = useState(false);
   const [issueError, setIssueError] = useState<string | null>(null);
 
-  const highlightedIssueFiles = issueResult
-    ? new Map(issueResult.affectedFiles.map(f => [f.fileId, f.confidence]))
-    : new Map<string, number>();
+  const highlightedIssueFiles = useMemo(() => {
+    return issueResult
+      ? new Map(issueResult.affectedFiles.map(f => [f.fileId, f.confidence]))
+      : new Map<string, number>();
+  }, [issueResult]);
 
   // ── Sidebar state ───────────────────────────────────────────────────────────
   const [sidebarWidth, setSidebarWidth] = useState(() => {
@@ -599,7 +601,7 @@ function RepoPageContent() {
 
           {/* Graph */}
           <div className="flex-1 overflow-hidden">
-            {view === "file-graph" ? (
+            <div style={{ display: view === "file-graph" ? "block" : "none", height: "100%" }}>
               <FileGraph
                 files={fileGraph.files}
                 edges={fileGraph.importEdges}
@@ -614,33 +616,39 @@ function RepoPageContent() {
                 zoomToNodeRef={zoomToNodeRef}
                 filteredNodeIds={filteredNodeIds}
               />
-            ) : selectedFunction && functionFiles ? (
-              <FunctionGraph
-                selectedFunction={selectedFunction}
-                functionFiles={functionFiles}
-                owner={owner}
-                repo={repo}
-                commitSha={commitSha}
-                onFunctionNavigate={handleFunctionNavigate}
-                onBackToFileGraph={handleBackToFileGraph}
-                onBackToFile={handleBackToFile}
-              />
-            ) : (
-              <div
-                className="flex items-center justify-center h-full"
-                style={{ background: "#0d1117", color: "#484f58" }}
-              >
-                <div className="text-center">
-                  <p className="text-lg mb-2">No function selected</p>
-                  <p className="text-sm">Click a file, then a function.</p>
-                  <button
-                    onClick={handleBackToFileGraph}
-                    className="mt-4 px-4 py-2 rounded-lg text-sm"
-                    style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+            </div>
+            
+            {view !== "file-graph" && (
+              <div className="h-full">
+                {selectedFunction && functionFiles ? (
+                  <FunctionGraph
+                    selectedFunction={selectedFunction}
+                    functionFiles={functionFiles}
+                    owner={owner}
+                    repo={repo}
+                    commitSha={commitSha}
+                    onFunctionNavigate={handleFunctionNavigate}
+                    onBackToFileGraph={handleBackToFileGraph}
+                    onBackToFile={handleBackToFile}
+                  />
+                ) : (
+                  <div
+                    className="flex items-center justify-center h-full"
+                    style={{ background: "#0d1117", color: "#484f58" }}
                   >
-                    Back to file graph
-                  </button>
-                </div>
+                    <div className="text-center">
+                      <p className="text-lg mb-2">No function selected</p>
+                      <p className="text-sm">Click a file, then a function.</p>
+                      <button
+                        onClick={handleBackToFileGraph}
+                        className="mt-4 px-4 py-2 rounded-lg text-sm"
+                        style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+                      >
+                        Back to file graph
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, memo, useMemo } from "react";
 import * as d3 from "d3";
 import dagre from "dagre";
 import type { FileNodeDTO, ImportEdgeDTO } from "../lib/types";
 import { getLanguageColor, getFolderGroup } from "../lib/graphHelpers";
+import { SimNode, SimLink, getRadius, trunc, brightenColor } from "./graphTypes";
 
 interface FileGraphProps {
   files: FileNodeDTO[];
@@ -23,7 +24,7 @@ interface FileGraphProps {
 
 import FocusExplorer from "./FocusExplorer";
 import { useFocusGraph } from "./useFocusGraph";
-import { SimNode, SimLink, getRadius, brightenColor, trunc } from "./graphTypes";
+// import { SimNode, SimLink, getRadius, brightenColor, trunc } from "./graphTypes";
 
 function getDominantLanguageColor(nodes: SimNode[]): string {
   const counts = new Map<string, number>();
@@ -35,17 +36,24 @@ function getDominantLanguageColor(nodes: SimNode[]): string {
 
 
 
-export default function FileGraph({
+function FileGraph({
   files, edges, onFileClick, searchQuery, selectedFileId, resetZoomRef, highlightedIssueFiles = new Map(),
   focusMode = false, zoomToNodeRef, filteredNodeIds,
 }: FileGraphProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const mainContainerRef = useRef<HTMLDivElement>(null);
+  const focusContainerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<d3.Selection<SVGSVGElement, unknown, null, undefined> | null>(null);
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
   const gRef = useRef<d3.Selection<SVGGElement, unknown, null, undefined> | null>(null);
   const nodeGRef = useRef<d3.Selection<SVGGElement, SimNode, SVGGElement, unknown> | null>(null);
   const linkRef = useRef<d3.Selection<SVGLineElement, SimLink, SVGGElement, unknown> | null>(null);
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null);
+
+  // Caching
+  const mainGraphRef = useRef<{ nodes: SimNode[], links: SimLink[] } | null>(null);
+  const lastFilesRef = useRef<FileNodeDTO[]>([]);
+  const lastEdgesRef = useRef<ImportEdgeDTO[]>([]);
+
   const autoFittedRef = useRef(false);
   const onFileClickRef = useRef(onFileClick);
   const selectedFileIdRef = useRef(selectedFileId);
@@ -146,7 +154,7 @@ export default function FileGraph({
       if (!simulationRef.current || !svgRef.current || !zoomRef.current) return;
       const node = simulationRef.current.nodes().find(n => n.id === fileId);
       if (!node || node.x == null || node.y == null) return;
-      const container = containerRef.current;
+      const container = mainContainerRef.current;
       const w = container?.clientWidth || 900;
       const h = container?.clientHeight || 600;
       const scale = 2.5;
@@ -174,14 +182,20 @@ export default function FileGraph({
 
   // ── Main graph build ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (focusedNodeId) {
-      // Store zoom before entering focus
-      if (svgRef.current) {
-        mainGraphZoomBeforeFocusRef.current = d3.zoomTransform(svgRef.current.node()!);
-      }
+    if (!mainContainerRef.current || files.length === 0) return;
+
+    // Cache check: only rebuild if files/edges actually changed
+    const dataChanged = lastFilesRef.current !== files || lastEdgesRef.current !== edges;
+    lastFilesRef.current = files;
+    lastEdgesRef.current = edges;
+
+    if (!dataChanged && mainGraphRef.current) {
+      // Restore logic: if we just came back from focus mode, the graph is already in mainContainerRef
+      // Stop simulation if entering focus mode
+      if (focusedNodeId) simulationRef.current?.stop();
       return;
     }
-    if (!containerRef.current || files.length === 0) return;
+
     autoFittedRef.current = false;
 
     // Preserve existing node positions
@@ -189,10 +203,10 @@ export default function FileGraph({
     simulationRef.current?.nodes().forEach(n => previousNodes.set(n.id, n));
 
     simulationRef.current?.stop();
-    d3.select(containerRef.current).selectAll("*").remove();
+    d3.select(mainContainerRef.current).selectAll("*").remove();
     setError(null);
 
-    const container = containerRef.current;
+    const container = mainContainerRef.current;
     const width = container.clientWidth || 900;
     const height = container.clientHeight || 600;
 
@@ -384,7 +398,7 @@ export default function FileGraph({
         };
       }
 
-      const folderBg = g.append("g").attr("class", "folder-bg");
+
       const tooltip = d3.select(container).append("div")
         .style("position", "absolute").style("background", "rgba(13,17,23,0.95)")
         .style("border", "1px solid #30363d").style("border-radius", "8px")
@@ -532,7 +546,7 @@ export default function FileGraph({
         }).iterations(3))
         .force("x", d3.forceX<SimNode>(width / 2).strength(0.01))
         .force("y", d3.forceY<SimNode>(height / 2).strength(0.01))
-        .force("center", d3.forceCenter(width / 2, height / 2).strength(0.02));
+        .force("center", d3.forceCenter(width / 2, height / 2));
       simulationRef.current = sim;
 
       if (!hasAnimatedRef.current) {
@@ -549,34 +563,6 @@ export default function FileGraph({
       });
 
       sim.on("end", () => {
-        // Folder cluster backgrounds — only render once, 4+ nodes, capped at 8 folders
-        const byFolder = new Map<string, SimNode[]>();
-        for (const n of nodes) { if (!byFolder.has(n.folder)) byFolder.set(n.folder, []); byFolder.get(n.folder)!.push(n); }
-        const topFolders = [...byFolder.entries()]
-          .filter(([, ns]) => ns.length >= 4)
-          .sort((a, b) => b[1].length - a[1].length)
-          .slice(0, 8);
-
-        folderBg.selectAll("*").remove();
-
-        for (const [folder, fNodes] of topFolders) {
-          let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-          for (const n of fNodes) { const r = getRadius(n); x0 = Math.min(x0, (n.x ?? 0) - r); y0 = Math.min(y0, (n.y ?? 0) - r); x1 = Math.max(x1, (n.x ?? 0) + r); y1 = Math.max(y1, (n.y ?? 0) + r); }
-          if (!isFinite(x0)) continue;
-          const pad = 70;
-          folderBg.append("rect").attr("x", x0 - pad).attr("y", y0 - pad)
-            .attr("width", x1 - x0 + pad * 2).attr("height", y1 - y0 + pad * 2)
-            .attr("rx", 10).attr("fill", "#ffffff").attr("fill-opacity", 0.07)
-            .attr("stroke", "rgba(255,255,255,0.06)").attr("stroke-width", 1)
-            .attr("pointer-events", "none");
-          folderBg.append("text").attr("x", x0 - pad + 6).attr("y", y0 - pad + 14)
-            .text(trunc(folder === "/" ? "(root)" : folder, 30))
-            .attr("fill", "rgba(255,255,255,0.25)").attr("font-size", "9px")
-            .attr("font-family", "system-ui, sans-serif").attr("pointer-events", "none");
-        }
-
-        // Overlap prevention logic completely removed so all labels display permanently.
-
         // Auto-fit only once
         if (!autoFittedRef.current) {
           autoFittedRef.current = true;
@@ -596,7 +582,7 @@ export default function FileGraph({
     }
 
     return () => { simulationRef.current?.stop(); };
-  }, [files, edges, focusedNodeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [files, edges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Search filter ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -623,7 +609,7 @@ export default function FileGraph({
   // ── Focus mode: subgraph extraction + radial re-layout (Delegated) ─────────
   useFocusGraph({
     focusedNodeId,
-    containerRef,
+    containerRef: focusContainerRef,
     simulationRef,
     svgRef,
     gRef,
@@ -706,8 +692,26 @@ export default function FileGraph({
           </div>
         </div>
       )}
-      <div ref={containerRef} className="w-full h-full overflow-hidden"
-        style={{ background: "#0d1117" }} />
+      {/* Main Graph Container */}
+      <div
+        ref={mainContainerRef}
+        className="w-full h-full overflow-hidden"
+        style={{
+          background: "#0d1117",
+          display: focusedNodeId ? "none" : "block"
+        }}
+      />
+
+      {/* Focus Graph Container */}
+      {focusedNodeId && (
+        <div
+          ref={focusContainerRef}
+          className="w-full h-full overflow-hidden absolute inset-0 z-0"
+          style={{ background: "#0d1117" }}
+        />
+      )}
     </div>
   );
 }
+
+export default memo(FileGraph);
