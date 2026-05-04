@@ -60,6 +60,15 @@ export interface FunctionNode {
     // low    = imports-only or parse error
 }
 
+export interface StructureNode {
+    id: string;
+    name: string;
+    filePath: string;
+    startLine: number;
+    endLine: number;
+    isExported: boolean;
+}
+
 export interface FileNode {
     // relativePath from repo root e.g. "src/utils/parser.ts"
     id: string;            // relativePath from repo root e.g. "src/utils/parser.ts"
@@ -72,6 +81,7 @@ export interface FileNode {
     kind: FileKind;
     isEntryPoint: boolean; // derived from entryScore — true when score >= ENTRY_THRESHOLD
     functions: FunctionNode[];
+    structures?: StructureNode[];
     externalImports: string[];     // react, lodash — no edge, just metadata
     unresolvedImports: string[];   // imports that couldn't be resolved to a file
 

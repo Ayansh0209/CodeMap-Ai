@@ -10,7 +10,7 @@ import {
     FunctionExpression,
     MethodDeclaration,
 } from "ts-morph";
-import { FunctionNode, Visibility, FunctionKind } from "../models/schema";
+import { FunctionNode, Visibility, FunctionKind, StructureNode } from "../models/schema";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -177,6 +177,26 @@ function extractFromArrowOrExpression(
     node: ArrowFunction | FunctionExpression,
     relativePath: string
 ): FunctionNode | null {
+    const parent = node.getParent();
+    if (parent) {
+        if (Node.isPropertyAssignment(parent) || Node.isCallExpression(parent)) {
+            // Check if it's a valid test or route handler
+            let isTestOrRoute = false;
+            if (Node.isCallExpression(parent)) {
+                const callExpr = parent as any;
+                const exprText = callExpr.getExpression?.()?.getText?.() || "";
+                if (/^(it|test|describe|suite|beforeEach|afterEach|beforeAll|afterAll)$/.test(exprText)) {
+                    isTestOrRoute = true;
+                } else if (/\.(get|post|put|delete|patch|use|all)$/i.test(exprText)) {
+                    isTestOrRoute = true;
+                }
+            }
+            if (!isTestOrRoute) {
+                return null; // skip invalid function
+            }
+        }
+    }
+
     // Walk up the parent chain to find a name for this function.
     // Handles: const foo = () => {}
     //          { foo: function() {} }
@@ -457,10 +477,40 @@ function extractFromCommonJS(
 
 // ── Main extractor ───────────────────────────────────────────────────────────
 
+function extractStructures(
+    sourceFile: SourceFile,
+    relativePath: string
+): StructureNode[] {
+    const structures: StructureNode[] = [];
+    
+    sourceFile.getDescendantsOfKind(SyntaxKind.VariableDeclaration).forEach(varDecl => {
+        const varStatement = varDecl.getFirstAncestorByKind(SyntaxKind.VariableStatement);
+        const isExp = varStatement ? isExported(varStatement) : false;
+        if (!isExp) return;
+        
+        const initializer = varDecl.getInitializer();
+        if (!initializer || initializer.getKind() !== SyntaxKind.CallExpression) return;
+        
+        const name = varDecl.getName();
+        if (!name) return;
+        
+        structures.push({
+            id: makeFunctionId(relativePath, name),
+            name,
+            filePath: relativePath,
+            startLine: varDecl.getStartLineNumber(),
+            endLine: varDecl.getEndLineNumber(),
+            isExported: true,
+        });
+    });
+    
+    return structures;
+}
+
 export function extractFunctionLevel(
     sourceFile: SourceFile,
     relativePath: string
-): FunctionNode[] {
+): { functions: FunctionNode[], structures: StructureNode[] } {
     const functions: FunctionNode[] = [];
     const seenIds = new Set<string>(); // deduplicate by ID
 
@@ -525,7 +575,7 @@ export function extractFunctionLevel(
             extractFromConstructor(node, relativePath)
         ));
 
-    return functions;
+    return { functions, structures: extractStructures(sourceFile, relativePath) };
 }
 
 export function extractTestMetadata(

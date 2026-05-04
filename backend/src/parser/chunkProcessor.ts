@@ -7,7 +7,7 @@ import path from "path";
 import fs from "fs";
 import { Project, ScriptTarget, ModuleKind } from "ts-morph";
 import { ParseDecision } from "../processing/sizeHandler";
-import { FileNode, ImportEdge, FunctionNode, FileKind } from "../models/schema";
+import { FileNode, ImportEdge, FunctionNode, FileKind, StructureNode } from "../models/schema";
 import { extractFileLevel } from "./fileLevel";
 import { extractFunctionLevel, extractTestMetadata } from "./functionLevel";
 import { ImportResolver } from "./importResolver";
@@ -200,10 +200,12 @@ async function processChunk(
             routeHandlers.set(decision.relativePath,  fileLevelResult.hasRouteHandlers);
 
             // ── Function level: only for "full" parse files ───────────────
-            const functions: FunctionNode[] =
-                decision.mode === "full"
+            const extracted = decision.mode === "full"
                     ? extractFunctionLevel(sourceFile, decision.relativePath)
-                    : [];
+                    : { functions: [], structures: [] };
+            
+            const functions: FunctionNode[] = extracted.functions;
+            const structures: StructureNode[] = extracted.structures;
 
             // Debug: warn if a JS file in full-parse mode produced 0 functions
             if (decision.mode === "full" && functions.length === 0) {
@@ -243,9 +245,9 @@ async function processChunk(
                 lineCount:        countLines(decision.absolutePath),
                 parseStatus:      decision.mode === "skip" ? "skipped" : decision.mode,
                 kind,
-                // isEntryPoint is set to false here — entryScorer in builder.ts overwrites it
                 isEntryPoint:     false,
                 functions,
+                structures,
                 externalImports:  [...new Set(confirmedExternal)],
                 unresolvedImports,
                 testSuites,

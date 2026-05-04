@@ -49,6 +49,16 @@ export interface FileNodeDTO {
   isDeadCode?: boolean;
   unusedExports?: string[];
   orphanSymbols?: string[];
+  structures?: StructureNodeDTO[];
+}
+
+export interface StructureNodeDTO {
+  id: string;
+  name: string;
+  filePath: string;
+  startLine: number;
+  endLine: number;
+  isExported: boolean;
 }
 
 export interface ImportEdgeDTO {

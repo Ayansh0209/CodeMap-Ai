@@ -90,9 +90,8 @@ function RepoPageContent() {
   const fileGraph = result?._inlineFileGraph ?? null;
   const [fetchedFunctions, setFetchedFunctions] = useState<Record<string, FunctionFilePayload>>({});
 
-  const functionFiles: Record<string, FunctionFilePayload> | null = useMemo(() => {
+  const functionFiles: Record<string, FunctionFilePayload> = useMemo(() => {
     const base = result?._functionFiles ?? {};
-    if (Object.keys(base).length === 0 && Object.keys(fetchedFunctions).length === 0) return null;
     return { ...base, ...fetchedFunctions };
   }, [result?._functionFiles, fetchedFunctions]);
   const owner = result?.owner ?? searchParams.get("repo")?.split("/")[0] ?? "";

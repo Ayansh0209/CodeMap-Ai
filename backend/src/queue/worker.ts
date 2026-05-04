@@ -212,6 +212,15 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
             console.warn("[worker] Failed to persist per-file functions:", (err as Error).message);
         }
 
+        let functionFilesObj = Object.fromEntries(functionFiles);
+        const functionsJsonStr = JSON.stringify(functionFilesObj);
+        const functionsSizeMB = Buffer.byteLength(functionsJsonStr, 'utf8') / 1024 / 1024;
+        
+        if (functionsSizeMB > 4) {
+            console.log(`[worker] _functionFiles is ${functionsSizeMB.toFixed(2)}MB (>4MB), omitting from inline result to save memory and avoid OOM. Frontend will lazy load.`);
+            functionFilesObj = {};
+        }
+
         const result = {
             success: true,
             owner,
@@ -226,7 +235,7 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
             // Inline for now so the completed handler + status route can inspect it
             _inlineFileGraph: fileGraph,
             // Per-file function data — Map converted to plain object for JSON serialization
-            _functionFiles: Object.fromEntries(functionFiles),
+            _functionFiles: functionFilesObj,
         };
 
         const resultJson = JSON.stringify(result)
@@ -236,7 +245,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
         if (parseFloat(resultSizeMB) > 10) {
             console.warn(`[worker] WARNING: result is ${resultSizeMB}MB — may exceed limits`)
             console.warn(`[worker] _inlineFileGraph files: ${result._inlineFileGraph?.files?.length}`)
-            console.warn(`[worker] _functionFiles keys: ${Object.keys(result._functionFiles ?? {}).length}`)
         }
 
         // ── Cache the result so same SHA is never reprocessed ─────────────────

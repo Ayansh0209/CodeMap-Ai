@@ -21,7 +21,7 @@ interface DetailsPanelProps {
   owner: string;
   repo: string;
   commitSha: string;
-  functionFiles: Record<string, FunctionFilePayload> | null;
+  functionFiles: Record<string, FunctionFilePayload>;
   onClose: () => void;
   onFileNavigate: (fileId: string) => void;
   onFunctionClick: (fn: FunctionNodeDTO) => void;
@@ -298,25 +298,22 @@ export default function DetailsPanel({
         <section>
           <SectionHeader>Functions ({functions.length})</SectionHeader>
 
-          {!functionFiles ? (
-            <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: "#0d1117", border: "1px dashed #30363d" }}>
-              <div style={{ color: "#f0883e", fontWeight: 600 }}>⚠ Function data not available</div>
-              <div style={{ color: "#8b949e" }}>
-                Re-analyze the repo to get function-level data. If this is a JavaScript-only repo, function analysis may be limited.
-              </div>
-            </div>
-          ) : file.parseStatus === "imports-only" ? (
+          {file.parseStatus === "imports-only" ? (
             <EmptyMessage>
               Function data unavailable — file was too large for full parse
             </EmptyMessage>
-          ) : functions.length === 0 ? (
+          ) : functions.length === 0 && (!file.structures || file.structures.length === 0) ? (
             <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: "#0d1117", border: "1px dashed #30363d" }}>
-              <div style={{ color: "#8b949e" }}>No functions detected in this file.</div>
+              <div style={{ color: "#8b949e" }}>No functions or structures detected in this file.</div>
               <div style={{ color: "#484f58" }}>
                 {file.language === "javascript"
                   ? "JavaScript files have limited function analysis. Try a TypeScript repo for full call graphs."
-                  : "This file may contain no exported functions, or parsing was skipped."}
+                  : "This file may contain no exported functions or schemas, or parsing was skipped."}
               </div>
+            </div>
+          ) : functions.length === 0 ? (
+            <div className="p-2 text-[10px] italic text-[#484f58]">
+              No real functions found.
             </div>
           ) : (
             <div
@@ -386,6 +383,42 @@ export default function DetailsPanel({
             </div>
           )}
         </section>
+
+        {/* ── STRUCTURES ──────────────────────────────────────────────────── */}
+        {file.structures && file.structures.length > 0 && (
+          <section>
+            <SectionHeader>Structures ({file.structures.length})</SectionHeader>
+            <div className="space-y-1 overflow-y-auto pr-1" style={{ maxHeight: "200px" }}>
+              {file.structures.map((s) => (
+                <div
+                  key={s.id}
+                  className="w-full text-left py-2 px-2.5 rounded-lg flex items-center gap-2 group transition-colors"
+                  style={{ background: "rgba(30,35,41,0.5)", border: "1px solid #30363d" }}
+                >
+                  <span
+                    className="text-xs truncate flex-1"
+                    style={{
+                      fontFamily: "var(--font-geist-mono), monospace",
+                      color: "#79c0ff",
+                    }}
+                  >
+                    {s.name}
+                  </span>
+                  <span
+                    className="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                    style={{
+                      background: "rgba(139,148,158,0.1)",
+                      color: "#8b949e",
+                      border: "1px solid #30363d"
+                    }}
+                  >
+                    STRUCTURE
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Imports outgoing */}
         <section>
