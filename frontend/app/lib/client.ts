@@ -120,7 +120,8 @@ export async function mapIssue(request: IssueMapRequest): Promise<IssueMapResult
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Issue mapping failed" }));
-    throw new Error(err.error || `HTTP ${res.status}`);
+    const msg = typeof err.error === "string" ? err.error : (err.error?.message || JSON.stringify(err.error) || `HTTP ${res.status}`);
+    throw new Error(msg);
   }
   return res.json();
 }

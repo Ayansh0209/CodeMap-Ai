@@ -332,3 +332,56 @@ body {
 .resize-handle .collapse-btn:hover {
   opacity: 1;
 }
+
+/* ── Markdown Styles for AI Chat ──────────────────────────── */
+.chat-prose {
+  line-height: 1.6;
+  font-size: 14px;
+  color: #e6edf3;
+}
+.chat-prose p { margin-bottom: 1em; }
+.chat-prose h1, .chat-prose h2, .chat-prose h3 {
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: #ffffff;
+}
+.chat-prose h1 { font-size: 1.5em; }
+.chat-prose h2 { font-size: 1.25em; }
+.chat-prose h3 { font-size: 1.1em; }
+
+.chat-prose code {
+  background: rgba(110, 118, 129, 0.2);
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 85%;
+}
+.chat-prose pre {
+  background: #0d1117 !important;
+  padding: 1em !important;
+  border-radius: 8px !important;
+  border: 1px solid #30363d !important;
+  margin: 1em 0 !important;
+  overflow-x: hidden !important;
+  white-space: pre-wrap !important;
+  word-break: break-all !important;
+}
+.chat-prose pre code {
+  background: transparent !important;
+  padding: 0 !important;
+  font-size: 13px !important;
+  color: #e6edf3 !important;
+  white-space: pre-wrap !important;
+}
+.chat-prose ul, .chat-prose ol {
+  margin-bottom: 1em;
+  padding-left: 1.5em;
+  list-style-type: disc;
+}
+.chat-prose ol {
+  list-style-type: decimal;
+}
+.chat-prose li { margin-bottom: 0.4em; }
+.chat-prose strong { color: #fff; font-weight: 600; }
+.chat-prose hr { border: 0; border-top: 1px solid #30363d; margin: 1.5em 0; }

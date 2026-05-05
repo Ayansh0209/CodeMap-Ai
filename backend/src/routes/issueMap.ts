@@ -37,13 +37,13 @@ const IssueMapRequestSchema = z.object({
             id:                     z.string(),
             label:                  z.string(),
             architecturalImportance: z.number().optional().default(0),
-        })).max(200),
+        })).max(3000), // Increased for large repos
         functions: z.array(z.object({
             id:       z.string(),
             name:     z.string(),
             filePath: z.string(),
-        })).max(500).optional().default([]),
-    }),
+        })).max(5000).optional().default([]), // Increased
+    }).optional(),
 });
 
 const SuggestFixRequestSchema = z.object({
@@ -56,15 +56,15 @@ const SuggestFixRequestSchema = z.object({
 });
 
 const ChatRequestSchema = z.object({
-    owner: z.string().min(1).max(100),
-    repo: z.string().min(1).max(100),
-    commitSha: z.string().min(1).max(200),
-    issueNumber: z.number().int().positive(),
-    fileId: z.string().min(1).max(500),
-    connectedFileIds: z.array(z.string()).max(5).optional().default([]),
-    messages: z.array(z.object({
-        role: z.enum(["user", "model"]),
-        content: z.string().max(2000),
+    owner:            z.string().min(1).max(100),
+    repo:             z.string().min(1).max(100),
+    commitSha:        z.string().min(1).max(200),
+    issueNumber:      z.number().int().positive().optional(),
+    fileId:           z.string().min(1).max(500),
+    connectedFileIds: z.array(z.string()).max(10).optional().default([]),
+    messages:         z.array(z.object({
+        role: z.enum(["user", "model", "assistant"]),
+        content: z.string().min(1)
     })).min(1).max(20),
 });
 
@@ -159,12 +159,32 @@ router.post("/map", async (req: Request, res: Response, next: NextFunction) => {
 
         console.log(`[issueMap] Fetched issue #${issueNumber}: ${issue.title} (${comments.length} comments)`);
 
+        // Step 3.5 — Ensure we have graph data (fetch from Redis if not in request)
+        let finalGraphData = graphData;
+        if (!finalGraphData) {
+            const graphKey = `graph:${owner}:${repo}`;
+            const cachedGraph = await redisConnection.get(graphKey);
+            if (cachedGraph) {
+                const parsed = JSON.parse(cachedGraph);
+                finalGraphData = {
+                    files: (parsed.files || []).map((f: any) => ({
+                        id: f.id,
+                        label: f.label,
+                        architecturalImportance: f.architecturalImportance || 0
+                    })),
+                    functions: [] // Functions can be fetched per-file if needed later
+                };
+                console.log(`[issueMap] Graph data recovered from Redis (${finalGraphData.files.length} files)`);
+            }
+        }
 
-        // Step 4 -- Deterministic matching via inline search index
+        if (!finalGraphData || !finalGraphData.files.length) {
+            return res.status(400).json({ error: "Graph data missing and not found in cache. Please re-analyze the repo." });
+        }
         // Sort files by architectural importance (descending), cap at 200
-        const sortedFiles = [...graphData.files]
+        const sortedFiles = [...finalGraphData.files]
             .sort((a, b) => (b.architecturalImportance ?? 0) - (a.architecturalImportance ?? 0))
-            .slice(0, 200);
+            .slice(0, 300); // Increased slice limit for large repos
 
         const inlineIndex = buildInlineSearchIndex(sortedFiles);
 
@@ -313,39 +333,53 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
         res.setHeader("Cache-Control", "no-cache");
         res.setHeader("Connection", "keep-alive");
 
-        const cacheKey = `issue-chat-ctx:${owner}:${repo}:${issueNumber}:${fileId}:${commitSha}`;
+        const cacheKey = `issue-chat-ctx:${owner}:${repo}:${issueNumber || "no-issue"}:${fileId}:${commitSha}`;
         let systemContext = await redisConnection.get(cacheKey);
 
         if (!systemContext) {
-            const [issue, comments, linkedPRs, primaryFileContent] = await Promise.all([
-                fetchIssue(owner, repo, issueNumber),
-                fetchIssueComments(owner, repo, issueNumber, 5),
-                fetchLinkedPRs(owner, repo, issueNumber),
-                fetchRawFile(owner, repo, commitSha, fileId)
-            ]);
+            let issueData: any = null;
+            let prData: any[] = [];
+            let primaryFileContent = "";
+
+            if (issueNumber) {
+                const [issue, comments, linkedPRs, content] = await Promise.all([
+                    fetchIssue(owner, repo, issueNumber),
+                    fetchIssueComments(owner, repo, issueNumber, 5),
+                    fetchLinkedPRs(owner, repo, issueNumber),
+                    fetchRawFile(owner, repo, commitSha, fileId)
+                ]);
+                issueData = issue;
+                prData = linkedPRs;
+                primaryFileContent = content;
+            } else {
+                primaryFileContent = await fetchRawFile(owner, repo, commitSha, fileId);
+            }
 
             const connectedContents = await Promise.all(
                 connectedFileIds.map((id: string) => fetchRawFile(owner, repo, commitSha, id).then((content: string) => ({ id, content })))
             );
 
-            const issueTerms = [...new Set((issue.title + " " + issue.body).match(/\b([a-z][a-zA-Z0-9_]{2,}|[A-Z][a-zA-Z0-9_]{2,})\b/g) || [])];
+            const issueTerms = issueData 
+                ? [...new Set((issueData.title + " " + issueData.body).match(/\b([a-z][a-zA-Z0-9_]{2,}|[A-Z][a-zA-Z0-9_]{2,})\b/g) || [])]
+                : [];
+                
             const primaryTruncated = smartTruncate(primaryFileContent, issueTerms, 300);
             
             const connectedParts = connectedContents
                 .filter((c: any) => c.content)
                 .map((c: any) => `-- ${c.id} --\n${smartTruncate(c.content, issueTerms, 80)}`)
                 .join("\n\n");
-
-            const prLines = linkedPRs.map((pr: any) => 
+ 
+            const prLines = prData.map((pr: any) => 
                 `  PR #${pr.number} [${pr.merged ? 'MERGED' : pr.state.toUpperCase()}]: ${pr.title}\n  Changed files: ${pr.changedFiles.slice(0, 10).join(', ')}`
             ).join("\n");
-
+ 
             systemContext = [
                 `REPOSITORY: ${owner}/${repo}`,
-                `ISSUE #${issueNumber}: ${issue.title}`,
+                issueData ? `ISSUE #${issueNumber}: ${issueData.title}` : "NO SPECIFIC ISSUE SELECTED",
                 "",
                 "ISSUE DESCRIPTION:",
-                issue.body.slice(0, 600),
+                issueData ? issueData.body.slice(0, 600) : "N/A",
                 "",
                 "LINKED PULL REQUESTS:",
                 prLines || "None",

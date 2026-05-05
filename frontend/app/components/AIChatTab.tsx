@@ -48,7 +48,7 @@ export default function AIChatTab({
     setIsLoading(true);
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch("http://localhost:5000/issue-map/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -73,15 +73,32 @@ export default function AIChatTab({
         const { value, done: readerDone } = await reader.read();
         done = readerDone;
         if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          setMessages((prev) => {
-            const newMessages = [...prev];
-            const last = newMessages[newMessages.length - 1];
-            if (last.role === "assistant") {
-              last.content += chunk;
+          const rawChunk = decoder.decode(value, { stream: true });
+          
+          // SSE events are separated by double newlines and start with "data: "
+          const lines = rawChunk.split("\n");
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              const dataStr = line.replace("data: ", "").trim();
+              if (dataStr === "[DONE]") continue;
+              
+              try {
+                // The backend JSON.stringifies the text delta
+                const content = JSON.parse(dataStr);
+                
+                setMessages((prev) => {
+                  const newMessages = [...prev];
+                  const last = newMessages[newMessages.length - 1];
+                  if (last && last.role === "assistant") {
+                    last.content += content;
+                  }
+                  return newMessages;
+                });
+              } catch (e) {
+                // Ignore parse errors for partial/malformed JSON in chunks
+              }
             }
-            return newMessages;
-          });
+          }
         }
       }
     } catch (err) {
@@ -118,8 +135,16 @@ export default function AIChatTab({
               }}
             >
               {msg.role === "assistant" ? (
-                <div className="prose prose-invert prose-sm max-w-none">
-                  <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <div 
+                  className="chat-prose" 
+                  style={{ 
+                    maxWidth: "100%", 
+                    overflowX: "hidden", 
+                    wordBreak: "break-word",
+                    overflowWrap: "anywhere" 
+                  }}
+                >
+                  <ReactMarkdown>{msg.content.replace(/\\n/g, "\n")}</ReactMarkdown>
                 </div>
               ) : (
                 <div className="whitespace-pre-wrap">{msg.content}</div>

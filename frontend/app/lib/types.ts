@@ -215,7 +215,7 @@ export interface IssueMapRequest {
   repo: string;
   commitSha: string;
   issueNumber: number;
-  graphData: {
+  graphData?: {
     files: Array<{ id: string; label: string; architecturalImportance: number }>;
     functions: Array<{ id: string; name: string; filePath: string }>;
   };

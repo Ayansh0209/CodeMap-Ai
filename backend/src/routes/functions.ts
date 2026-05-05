@@ -18,6 +18,7 @@ router.post("/", async (req, res) => {
         const cached = await redisConnection.get(cacheKey);
 
         if (!cached) {
+            console.log(`[functions] Cache miss for ${fileId}`);
             return res.status(404).json({ error: "not found" });
         }
 

@@ -215,7 +215,7 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
         let functionFilesObj = Object.fromEntries(functionFiles);
         const functionsJsonStr = JSON.stringify(functionFilesObj);
         const functionsSizeMB = Buffer.byteLength(functionsJsonStr, 'utf8') / 1024 / 1024;
-        
+
         if (functionsSizeMB > 4) {
             console.log(`[worker] _functionFiles is ${functionsSizeMB.toFixed(2)}MB (>4MB), omitting from inline result to save memory and avoid OOM. Frontend will lazy load.`);
             functionFilesObj = {};

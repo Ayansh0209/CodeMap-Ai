@@ -86,13 +86,13 @@ export default function IssueMapper({
         repo,
         commitSha,
         issueNumber,
-        graphData: {
+        graphData: (files.length > 300) ? undefined : {
           files: files.map(f => ({
             id: f.id,
             label: f.label,
             architecturalImportance: f.architecturalImportance ?? 0,
           })),
-          functions: functions.map(fn => ({
+          functions: (functions.length > 500) ? [] : functions.map(fn => ({
             id: fn.id,
             name: fn.name,
             filePath: fn.filePath,
@@ -101,7 +101,8 @@ export default function IssueMapper({
       });
       onResult(result);
     } catch (err) {
-      setError((err as Error).message);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -201,7 +202,7 @@ export default function IssueMapper({
       {/* Validation / API error */}
       {displayError && (
         <p className="text-[10px]" style={{ color: "#f85149" }}>
-          {displayError}
+          {typeof displayError === "string" ? displayError : JSON.stringify(displayError)}
         </p>
       )}
 
