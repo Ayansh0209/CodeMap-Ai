@@ -1,7 +1,23 @@
+// src/parser/issueAnalyzer.ts
+// ─────────────────────────────────────────────────────────────────────────────
+// Gemini API calls for issue mapping, graph navigation, and chat.
+//
+// Phase 3 redesign:
+//   - callGeminiForMapping() now supports iterative rounds:
+//     Round 1: asks Gemini "are you confident, or do you need more files?"
+//     Round 2: forced final answer with additional context
+//   - Added callGeminiForGraphNavigation() for Stage 2:
+//     sends compact graph map to Gemini, receives file paths to examine
+//   - Removed legacy overloads (no more files[] backward compat)
+//   - callGeminiForChatStream() — untouched
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { config } from "../config/config";
 import type { IssueComment, LinkedPR } from "../github/issueClient";
 import type { CodeSnippet } from "./snippetFetcher";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface AffectedFile {
     fileId: string;
@@ -10,6 +26,20 @@ export interface AffectedFile {
 }
 
 export interface GeminiMappingResult {
+    affectedFiles: AffectedFile[];
+    summary: string;
+    fixApproach: string;
+}
+
+/** Round 1 can return either a final answer or a request for more files */
+export interface GeminiRound1Response {
+    /** If true, Gemini wants more files before giving a final answer */
+    needsMoreContext: boolean;
+    /** File paths Gemini wants to examine (only when needsMoreContext=true) */
+    requestedFiles: string[];
+    /** Reason for needing more context (only when needsMoreContext=true) */
+    reason: string;
+    /** Final answer (only when needsMoreContext=false) */
     affectedFiles: AffectedFile[];
     summary: string;
     fixApproach: string;
@@ -32,7 +62,8 @@ export interface IssueContextInput {
     linkedPRs: LinkedPR[];
 }
 
-// Lazy singleton
+// ── Client ────────────────────────────────────────────────────────────────────
+
 let geminiClient: GoogleGenerativeAI | null = null;
 function getClient(): GoogleGenerativeAI | null {
     if (!config.gemini.apiKey) return null;
@@ -40,69 +71,8 @@ function getClient(): GoogleGenerativeAI | null {
     return geminiClient;
 }
 
+// ── Logging ───────────────────────────────────────────────────────────────────
 
-
-// Smart truncation
-export function smartTruncate(content: string, issueTerms: string[], maxLines = 300): string {
-    const lines = content.split("\n");
-    if (lines.length <= maxLines) return content;
-    const relevantLineIndices: number[] = [];
-    lines.forEach((line, i) => {
-        if (issueTerms.some((term) => line.toLowerCase().includes(term.toLowerCase()))) {
-            for (let j = Math.max(0, i - 10); j <= Math.min(lines.length - 1, i + 10); j++) {
-                relevantLineIndices.push(j);
-            }
-        }
-    });
-    if (relevantLineIndices.length > 0) {
-        const uniqueIndices = [...new Set(relevantLineIndices)].sort((a, b) => a - b);
-        const relevantLines = uniqueIndices.map((i) => `L${i + 1}: ${lines[i]}`);
-        return `... [Showing relevant sections] ...\n\n${relevantLines.join("\n")}`;
-    }
-    return [...lines.slice(0, 150), "\n... omitted ...\n", ...lines.slice(-50)].join("\n");
-}
-
-function extractTechnicalTerms(text: string): string[] {
-    const matches = text.match(/\b([a-z][a-zA-Z0-9_]{2,}|[A-Z][a-zA-Z0-9_]{2,})\b/g) ?? [];
-    return [...new Set(matches.slice(0, 20))];
-}
-
-// ── Snippet formatter ─────────────────────────────────────────────────────────
-
-/**
- * Format code snippets into a structured prompt section.
- *
- * Each snippet is presented with:
- *   - File path and function name as a header
- *   - Source signals that explain WHY this snippet was selected
- *   - The actual code body in a fenced block
- *
- * This format helps Gemini understand the retrieval reasoning and evaluate
- * each snippet independently.
- */
-function formatSnippetsForPrompt(snippets: CodeSnippet[]): string {
-    if (snippets.length === 0) {
-        return "(No code snippets available — analyze based on issue text only)";
-    }
-
-    return snippets.map((s, i) => {
-        const signals: string[] = [];
-        if (s.hasAuthCheck)    signals.push("contains auth/permission check");
-        if (s.hasDatabaseCall) signals.push("contains database operations");
-        signals.push(...s.selectionReasons.slice(0, 2));
-
-        const header = [
-            `--- Snippet ${i + 1} ---`,
-            `File: ${s.fileId}`,
-            `Function: ${s.functionName} (lines ${s.startLine}-${s.endLine})`,
-            signals.length > 0 ? `Signals: ${signals.join("; ")}` : "",
-        ].filter(Boolean).join("\n");
-
-        return `${header}\n\`\`\`\n${s.body}\n\`\`\``;
-    }).join("\n\n");
-}
-
-// Logging
 function logUsage(operation: string, usage: any, prompt: string, response: string) {
     if (!usage) return;
     const { promptTokenCount, candidatesTokenCount } = usage;
@@ -113,64 +83,47 @@ function logUsage(operation: string, usage: any, prompt: string, response: strin
     console.log(`\x1b[1;31m[COST] $${cost.toFixed(6)}\x1b[0m\n`);
 }
 
+// ── Snippet formatter ─────────────────────────────────────────────────────────
+
 /**
- * Call Gemini to map an issue to affected files by reasoning over actual code.
- *
- * WHAT CHANGED (Phase 2):
- *   Old: received 100 filenames + keyword hints → asked Gemini to guess
- *   New: receives actual code snippets → asks Gemini to reason like a senior engineer
- *
- * The prompt deliberately:
- *   - Gives Gemini the ACTUAL function bodies, not just filenames
- *   - Does NOT include deterministic keyword hints (they biased the AI)
- *   - Asks Gemini to explain its reasoning in terms of the code it read
- *   - Makes Gemini the only ranking authority — not the keyword matcher
- *
- * BACKWARD COMPATIBILITY:
- *   The old route still calls this with (issue, files[], keywordHints[]).
- *   When the second argument is a file-shape array (has `id` field, not `fileId`),
- *   we pass an empty snippets array — Gemini reasons from issue text alone.
- *   This is still better than the old prompt which listed 100 filenames.
- *
- * @param issue     Issue context (title, body, comments, linked PRs)
- * @param snippets  Code snippets from snippetFetcher (actual function bodies)
- * @param linkedPRs Linked PRs for additional context (not for ranking)
+ * Format code snippets into a structured prompt section.
+ * Each snippet is presented with file path, function name, and source signals.
  */
-// Overload 1: new signature (Phase 2 pipeline)
-export async function callGeminiForMapping(
+function formatSnippetsForPrompt(snippets: CodeSnippet[]): string {
+    if (snippets.length === 0) {
+        return "(No code snippets available — analyze based on issue text only)";
+    }
+
+    return snippets.map((s, i) => {
+        const header = [
+            `--- Snippet ${i + 1} ---`,
+            `File: ${s.fileId}`,
+            `Function: ${s.functionName} (lines ${s.startLine}-${s.endLine})`,
+        ].join("\n");
+
+        return `${header}\n\`\`\`\n${s.body}\n\`\`\``;
+    }).join("\n\n");
+}
+
+// ── Stage 2: Gemini graph navigation ──────────────────────────────────────────
+
+/**
+ * Ask Gemini to navigate the graph structure and identify files to examine.
+ *
+ * Used in Stage 2 when Stage 1 token traversal produces insufficient candidates.
+ * Sends Gemini the issue text + a compact graph map (one line per file with
+ * function names). Gemini returns which files it wants to read.
+ *
+ * @param issue     Issue context
+ * @param graphMap  Compact graph map (from buildCompactGraphMap())
+ * @returns         List of file paths Gemini wants to examine
+ */
+export async function callGeminiForGraphNavigation(
     issue: IssueContextInput,
-    snippets: CodeSnippet[],
-    linkedPRs: LinkedPR[],
-): Promise<GeminiMappingResult | null>;
-// Overload 2: legacy signature (existing route, backward compat)
-export async function callGeminiForMapping(
-    issue: IssueContextInput,
-    files: Array<{ id: string; architecturalImportance?: number }>,
-    keywordHints: string[],
-): Promise<GeminiMappingResult | null>;
-// Implementation
-export async function callGeminiForMapping(
-    issue: IssueContextInput,
-    snippetsOrFiles: CodeSnippet[] | Array<{ id: string; architecturalImportance?: number }>,
-    linkedPRsOrHints: LinkedPR[] | string[],
-): Promise<GeminiMappingResult | null> {
+    graphMap: string,
+): Promise<string[]> {
     const client = getClient();
-    if (!client) return null;
-
-    // Normalize overload arguments:
-    // Old route calls: (issue, files[], keywordHints[]) — files have `id` not `fileId`
-    // New pipeline calls: (issue, snippets[], linkedPRs[]) — snippets have `fileId`
-    const isLegacyCall =
-        snippetsOrFiles.length === 0 ||
-        (snippetsOrFiles[0] && "id" in snippetsOrFiles[0] && !("fileId" in snippetsOrFiles[0]));
-
-    const snippets: CodeSnippet[] = isLegacyCall
-        ? [] // Legacy call: no snippets — Gemini reasons from issue text alone
-        : (snippetsOrFiles as CodeSnippet[]);
-
-    const linkedPRs: LinkedPR[] = (
-        typeof linkedPRsOrHints[0] === "string" || linkedPRsOrHints.length === 0
-    ) ? [] : (linkedPRsOrHints as LinkedPR[]);
+    if (!client) return [];
 
     const model = client.getGenerativeModel({
         model: "gemini-2.5-pro",
@@ -180,7 +133,104 @@ export async function callGeminiForMapping(
         },
     });
 
-    // Format the issue context
+    const commentText = issue.comments.slice(0, 5)
+        .map(c => `${c.author}: ${c.body.slice(0, 300)}`)
+        .join("\n");
+
+    const prompt = `You are a senior software engineer. You need to identify which source files are likely involved in a bug or feature request.
+
+You do NOT have the source code yet. You have the issue description and a map of the entire codebase showing file paths and function names.
+
+═══════════════════════════════════════════════
+ISSUE
+═══════════════════════════════════════════════
+Title: ${issue.title}
+
+Body:
+${issue.body.slice(0, 2000)}
+
+${commentText ? `Discussion:\n${commentText}\n` : ""}
+═══════════════════════════════════════════════
+CODEBASE MAP (file path: function names)
+═══════════════════════════════════════════════
+${graphMap}
+
+═══════════════════════════════════════════════
+INSTRUCTIONS
+═══════════════════════════════════════════════
+Based on the issue and the codebase map above, identify which files you would need to read to diagnose this issue.
+
+Think about:
+- Which function names look related to the issue?
+- Which file paths suggest relevant domain areas?
+- Which files likely contain the entry points for the described behavior?
+
+Return JSON:
+{
+  "requestedFiles": ["<exact file path from the map>", "..."],
+  "reasoning": "<1-2 sentences explaining why you chose these files>"
+}
+
+IMPORTANT:
+- Return 5-15 file paths — enough to cover the issue, not so many it's noise
+- Only return file paths that appear in the CODEBASE MAP above
+- Prefer files with function names that semantically match the issue
+`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const res = await result.response;
+        const text = res.text();
+        logUsage("graph-navigation", res.usageMetadata, prompt, text);
+
+        const parsed = JSON.parse(text);
+        const files = (parsed.requestedFiles ?? [])
+            .filter((f: unknown): f is string => typeof f === "string")
+            .slice(0, 15);
+
+        console.log(`\x1b[34m[issueAnalyzer] Gemini graph navigation returned ${files.length} files\x1b[0m`);
+        return files;
+    } catch (err) {
+        console.error("\x1b[31m[issueAnalyzer] Graph navigation failed:\x1b[0m", err);
+        return [];
+    }
+}
+
+// ── Stage 3: Gemini mapping (iterative) ───────────────────────────────────────
+
+/**
+ * Call Gemini to map an issue to affected files by reasoning over actual code.
+ *
+ * Phase 3 redesign:
+ *   Round 1: Gemini reads code snippets and either:
+ *     a) Returns a final answer (needsMoreContext=false)
+ *     b) Requests additional files (needsMoreContext=true)
+ *
+ *   Round 2: Called with additional snippets, Gemini gives a final answer.
+ *
+ * @param issue     Issue context
+ * @param snippets  Code snippets (actual function bodies)
+ * @param linkedPRs Linked PRs for context
+ * @param round     1 or 2 (default 1)
+ * @returns         Round 1: GeminiRound1Response (may request more files)
+ *                  Round 2: GeminiMappingResult (always final answer)
+ */
+export async function callGeminiForMappingRound1(
+    issue: IssueContextInput,
+    snippets: CodeSnippet[],
+    linkedPRs: LinkedPR[],
+): Promise<GeminiRound1Response | null> {
+    const client = getClient();
+    if (!client) return null;
+
+    const model = client.getGenerativeModel({
+        model: "gemini-2.5-pro",
+        generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+        },
+    });
+
     const commentText = issue.comments.slice(0, 5)
         .map(c => `${c.author}: ${c.body.slice(0, 300)}`)
         .join("\n");
@@ -194,56 +244,9 @@ export async function callGeminiForMapping(
 
     const snippetSection = formatSnippetsForPrompt(snippets);
 
+    const prompt = `You are a senior software engineer performing a code review to identify which files and functions are involved in a bug or feature request.
 
-    const legacyFiles = isLegacyCall ? (snippetsOrFiles as Array<{ id: string }>) : [];
-    
-    let prompt = "";
-    if (isLegacyCall) {
-        prompt = `You are a senior software engineer performing a code review to identify which files are involved in a bug or feature request.
-
-You do not have the actual source code, only the file paths. Reason about which files are most likely affected based on their names and the issue context.
-
-═══════════════════════════════════════════════
-ISSUE
-═══════════════════════════════════════════════
-Title: ${issue.title}
-
-Body:
-${issue.body.slice(0, 2000)}
-
-${commentText ? `Discussion:\n${commentText}\n` : ""}
-${prContext !== "No linked pull requests." ? `\nLinked PRs:\n${prContext}\n` : ""}
-═══════════════════════════════════════════════
-CANDIDATE FILES
-═══════════════════════════════════════════════
-${legacyFiles.map(f => f.id).join("\n")}
-
-═══════════════════════════════════════════════
-INSTRUCTIONS
-═══════════════════════════════════════════════
-Analyze the issue and the candidate files above. Identify which files are likely involved.
-
-Return JSON with this exact schema:
-{
-  "affectedFiles": [
-    {
-      "fileId": "<exact file path from the list above>",
-      "confidence": <0-100>,
-      "reason": "<1 sentence explaining why this file is relevant>"
-    }
-  ],
-  "summary": "<1-2 sentences summarizing the issue>",
-  "fixApproach": "<1-2 sentences on how to fix it>"
-}
-
-IMPORTANT:
-- Only include files from the CANDIDATE FILES list
-- Be highly selective. If you are not sure, do not include the file.
-`;
-    } else {
-        prompt = `You are a senior software engineer performing a code review to identify which files and functions are involved in a bug or feature request.
-
-You have been given the actual source code of the most relevant functions from this repository. Read the code carefully and reason like an engineer — not like a keyword matcher.
+You have been given actual source code snippets from the repository. Read the code carefully.
 
 ═══════════════════════════════════════════════
 ISSUE
@@ -263,40 +266,145 @@ ${snippetSection}
 ═══════════════════════════════════════════════
 INSTRUCTIONS
 ═══════════════════════════════════════════════
-Analyze the issue and the code snippets above. Identify which files and functions are involved.
+Based on the issue and the code snippets above, do ONE of two things:
 
-For each affected file, explain:
-1. What this code does (based on what you read, not just the filename)
-2. Why it is relevant to this specific issue
-3. What would need to change to fix this issue
-
-Return JSON with this exact schema:
+OPTION A — If you can confidently identify the affected files:
+Return JSON:
 {
+  "needsMoreContext": false,
+  "requestedFiles": [],
+  "reason": "",
   "affectedFiles": [
     {
       "fileId": "<exact file path from the snippets above>",
       "confidence": <0-100>,
-      "reason": "<1-2 sentences: what you read in the code and why it matters for this issue>"
+      "reason": "<1-2 sentences: what you read in the code and why it matters>"
     }
   ],
-  "summary": "<2-3 sentences: what this issue is about based on the code>",
-  "fixApproach": "<2-3 sentences: what would need to change at the code level to fix this>"
+  "summary": "<2-3 sentences about the issue based on the code>",
+  "fixApproach": "<2-3 sentences on what needs to change>"
+}
+
+OPTION B — If you need to see additional files before answering:
+Return JSON:
+{
+  "needsMoreContext": true,
+  "requestedFiles": ["<file path you want to see>", "..."],
+  "reason": "<1 sentence explaining what you need to see and why>",
+  "affectedFiles": [],
+  "summary": "",
+  "fixApproach": ""
 }
 
 IMPORTANT:
-- Only include files from the snippets above
-- Confidence should reflect how certain you are based on the CODE you read, not the filename
-- A confidence of 90+ means you can point to specific lines in the code that are the problem
-- A confidence of 50-70 means the code is in the right area but you need more context
-- Do not include files just because they have a related name — only include them if you read code that is actually involved
+- Only request more files if the snippets truly are insufficient
+- If you have enough context, always choose Option A
+- Confidence 90+ means you can point to specific lines
+- Confidence 50-70 means you're in the right area but want more context
+- Only include files from the snippets in affectedFiles
 `;
-    }
 
     try {
         const result = await model.generateContent(prompt);
         const res = await result.response;
         const text = res.text();
-        logUsage("mapping", res.usageMetadata, prompt, text);
+        logUsage("mapping-round1", res.usageMetadata, prompt, text);
+
+        const parsed = JSON.parse(text);
+        return {
+            needsMoreContext: Boolean(parsed.needsMoreContext),
+            requestedFiles: (parsed.requestedFiles ?? []).filter((f: unknown): f is string => typeof f === "string"),
+            reason: String(parsed.reason || ""),
+            affectedFiles: (parsed.affectedFiles ?? []).map((f: any) => ({
+                fileId: String(f.fileId),
+                confidence: Number(f.confidence) || 50,
+                reason: String(f.reason || ""),
+            })),
+            summary: String(parsed.summary || ""),
+            fixApproach: String(parsed.fixApproach || ""),
+        };
+    } catch (err) {
+        console.error("\x1b[31m[issueAnalyzer] Round 1 mapping failed:\x1b[0m", err);
+        return null;
+    }
+}
+
+/**
+ * Round 2: Gemini gives a final answer with additional context.
+ * No more iteration — this is always the last call.
+ */
+export async function callGeminiForMappingFinal(
+    issue: IssueContextInput,
+    allSnippets: CodeSnippet[],
+    linkedPRs: LinkedPR[],
+): Promise<GeminiMappingResult | null> {
+    const client = getClient();
+    if (!client) return null;
+
+    const model = client.getGenerativeModel({
+        model: "gemini-2.5-pro",
+        generationConfig: {
+            temperature: 0.1,
+            responseMimeType: "application/json",
+        },
+    });
+
+    const commentText = issue.comments.slice(0, 5)
+        .map(c => `${c.author}: ${c.body.slice(0, 300)}`)
+        .join("\n");
+
+    const prContext = linkedPRs.length > 0
+        ? linkedPRs.map(pr =>
+            `PR #${pr.number} (${pr.state}${pr.merged ? ", merged" : ""}): ${pr.title}\n` +
+            `Changed files: ${pr.changedFiles.slice(0, 10).join(", ")}`
+          ).join("\n")
+        : "No linked pull requests.";
+
+    const snippetSection = formatSnippetsForPrompt(allSnippets);
+
+    const prompt = `You are a senior software engineer. This is your FINAL analysis.
+
+You previously requested additional files. Here is ALL the code you have asked for, plus the original snippets.
+
+═══════════════════════════════════════════════
+ISSUE
+═══════════════════════════════════════════════
+Title: ${issue.title}
+
+Body:
+${issue.body.slice(0, 2000)}
+
+${commentText ? `Discussion:\n${commentText}\n` : ""}
+${prContext !== "No linked pull requests." ? `\nLinked PRs:\n${prContext}\n` : ""}
+═══════════════════════════════════════════════
+ALL CODE SNIPPETS
+═══════════════════════════════════════════════
+${snippetSection}
+
+═══════════════════════════════════════════════
+INSTRUCTIONS
+═══════════════════════════════════════════════
+Return your FINAL answer. Identify the affected files with reasoning grounded in the code.
+
+Return JSON:
+{
+  "affectedFiles": [
+    {
+      "fileId": "<exact file path>",
+      "confidence": <0-100>,
+      "reason": "<1-2 sentences based on the code you read>"
+    }
+  ],
+  "summary": "<2-3 sentences about the issue>",
+  "fixApproach": "<2-3 sentences on what needs to change>"
+}
+`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const res = await result.response;
+        const text = res.text();
+        logUsage("mapping-final", res.usageMetadata, prompt, text);
 
         const parsed = JSON.parse(text);
         return {
@@ -309,12 +417,35 @@ IMPORTANT:
             fixApproach: String(parsed.fixApproach || ""),
         };
     } catch (err) {
-        console.error("[issueAnalyzer] Mapping failed:", err);
+        console.error("\x1b[31m[issueAnalyzer] Final mapping failed:\x1b[0m", err);
         return null;
     }
 }
 
-// Chat
+// ── Legacy compat wrapper ─────────────────────────────────────────────────────
+
+/**
+ * Backward-compatible wrapper used by the legacy pipeline path.
+ * Calls Round 1 and if it gets a final answer, returns it.
+ * If Round 1 requests more context, returns what it has (no round 2 in legacy).
+ */
+export async function callGeminiForMapping(
+    issue: IssueContextInput,
+    snippets: CodeSnippet[],
+    linkedPRs: LinkedPR[],
+): Promise<GeminiMappingResult | null> {
+    const round1 = await callGeminiForMappingRound1(issue, snippets, linkedPRs);
+    if (!round1) return null;
+
+    return {
+        affectedFiles: round1.affectedFiles,
+        summary: round1.summary,
+        fixApproach: round1.fixApproach,
+    };
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
 export async function callGeminiForChatStream(
     systemInstruction: string,
     messages: Array<{ role: string; content: string }>
@@ -337,4 +468,32 @@ export async function callGeminiForChatStream(
     const lastMessage = messages[messages.length - 1].content;
     const chat = model.startChat({ history });
     return chat.sendMessageStream(lastMessage);
+}
+
+// ── Utility: smart truncation for large files ─────────────────────────────────
+
+/**
+ * Smart truncation for large files. Used by the /suggest-fix route.
+ * Preserves lines around issue-related terms, drops the middle of huge files.
+ */
+export function smartTruncate(content: string, issueTerms: string[], maxLines = 300): string {
+    const lines = content.split("\n");
+    if (lines.length <= maxLines) return content;
+
+    const relevantLineIndices: number[] = [];
+    lines.forEach((line, i) => {
+        if (issueTerms.some((term) => line.toLowerCase().includes(term.toLowerCase()))) {
+            for (let j = Math.max(0, i - 10); j <= Math.min(lines.length - 1, i + 10); j++) {
+                relevantLineIndices.push(j);
+            }
+        }
+    });
+
+    if (relevantLineIndices.length > 0) {
+        const uniqueIndices = [...new Set(relevantLineIndices)].sort((a, b) => a - b);
+        const relevantLines = uniqueIndices.map((i) => `L${i + 1}: ${lines[i]}`);
+        return `... [Showing relevant sections] ...\n\n${relevantLines.join("\n")}`;
+    }
+
+    return [...lines.slice(0, 150), "\n... omitted ...\n", ...lines.slice(-50)].join("\n");
 }

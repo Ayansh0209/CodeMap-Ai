@@ -1,58 +1,48 @@
 // src/parser/issuePipeline.ts
 // ─────────────────────────────────────────────────────────────────────────────
-// Pipeline orchestrator for the Phase 2 issue mapping system.
+// Pipeline orchestrator — three-stage, cost-progressive, Gemini-guided.
 //
-// This module owns the end-to-end flow and nothing else.
-// It calls each stage in order, handles the two routing paths (specific vs
-// vague issues), and degrades gracefully when any stage fails.
+// Phase 3 redesign:
+//   Stage 1 — Token-guided graph traversal (free, no AI call):
+//     Extract tokens from issue → substring match against RetrievalIndex
+//     → barrel expansion → neighborhood expansion.
+//     If >= MIN_CANDIDATES_FOR_STAGE1 → skip to Stage 3.
+//     If < MIN_CANDIDATES_FOR_STAGE1 → go to Stage 2.
 //
-// ROUTING LOGIC:
-//   Specific issue path (default):
-//     1. IssueUnderstanding → SearchIntent (deterministic)
-//     2. IssueMapper → candidate fileIds (graph traversal)
-//     3. SnippetFetcher → actual code snippets (GitHub fetch + Redis cache)
-//     4. callGeminiForMapping → affected files with reasoning
+//   Stage 2 — Gemini graph navigation (1 AI call, only when needed):
+//     Send compact graph map to Gemini → Gemini returns file paths to examine.
+//     Add these to the candidate set → go to Stage 3.
 //
-//   Vague issue path (SearchIntent.isVague === true):
-//     1. IssueUnderstanding → SearchIntent (marked isVague)
-//     2. First Gemini call: reads issue → extracts domain intent as text
-//     3. Feed extracted domain back into IssueUnderstanding to enrich SearchIntent
-//     4. Continue with steps 2-4 of specific path
-//
-//   PR fast path (linkedPRs with changedFiles):
-//     PR files are injected as "pr" source candidates by the mapper.
-//     The snippet fetcher always includes PR-sourced files regardless of score.
-//     This is automatic — no special routing needed.
+//   Stage 3 — Gemini-directed snippet fetching (max 2 rounds):
+//     Round 1: fetch snippets → send to Gemini → either final answer or
+//              "I need more files" with requestedFiles list.
+//     Round 2 (only if requested): fetch additional files → final answer.
 //
 // GRACEFUL DEGRADATION:
-//   If the RetrievalIndex is missing in Redis → mapper falls back to inline search
-//   If snippetFetcher fails → pass empty snippets array to Gemini
-//   If Gemini fails → return the deterministic mapper results as-is
-//   If the entire new pipeline fails → fall back to the old behavior
-//
-// WHAT THIS FILE DOES NOT DO:
-//   - No business logic (that lives in understanding/mapper/fetcher/analyzer)
-//   - No Redis reads/writes (that lives in the individual stages)
-//   - No route handling (that lives in routes/issueMap.ts, untouched in Phase 2)
+//   If RetrievalIndex missing → legacy pipeline (sends filenames to Gemini)
+//   If Stage 2 Gemini fails → proceed with Stage 1 candidates only
+//   If Round 1 Gemini fails → return empty result (never 500)
+//   If Round 2 Gemini fails → return Round 1's partial result
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { extractSearchIntent } from "./issueUnderstanding";
 import type { SearchIntent } from "./issueUnderstanding";
-import { traverseGraph } from "./issueMapper";
-import type { CandidateSet } from "./issueMapper";
+import { traverseGraph, buildCompactGraphMap, MIN_CANDIDATES_FOR_STAGE1 } from "./issueMapper";
+import type { CandidateSet, CandidateFileEntry } from "./issueMapper";
 import { fetchSnippets } from "./snippetFetcher";
 import type { CodeSnippet } from "./snippetFetcher";
 
 import {
+    callGeminiForMappingRound1,
+    callGeminiForMappingFinal,
     callGeminiForMapping,
+    callGeminiForGraphNavigation,
     type GeminiMappingResult,
     type IssueContextInput,
     type AffectedFile,
 } from "./issueAnalyzer";
 import type { RetrievalIndex } from "../models/retrieval";
 import type { LinkedPR } from "../github/issueClient";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { config } from "../config/config";
 import { redisConnection } from "../queue/jobQueue";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -71,12 +61,10 @@ export interface PipelineInput {
     linkedPRs: LinkedPR[];
     /**
      * All file IDs in the visualization graph (for filtering candidates).
-     * These are the files the parser has seen — we only map to files we know about.
      */
     graphFileIds: Set<string>;
     /**
-     * Inline files for legacy fallback (sent by the route handler from the
-     * request body — these existed before the RetrievalIndex was built).
+     * Inline files for legacy fallback (repos analyzed before RetrievalIndex).
      */
     legacyFiles?: Array<{ id: string; label: string; architecturalImportance?: number }>;
 }
@@ -85,93 +73,26 @@ export interface PipelineInput {
 export interface PipelineResult {
     /** The AI mapping result (or null if Gemini failed) */
     geminiResult: GeminiMappingResult | null;
-    /**
-     * Whether the new pipeline (RetrievalIndex + snippets) was used.
-     * false = fell back to old behavior (inline search + filenames)
-     */
+    /** Whether the new pipeline was used (false = legacy fallback) */
     usedNewPipeline: boolean;
-    /** Number of code snippets passed to Gemini (for debugging/logging) */
+    /** Number of code snippets passed to Gemini */
     snippetCount: number;
     /** Whether the issue was classified as vague */
     isVague: boolean;
-    /** The extracted search intent (for logging and frontend display) */
+    /** The extracted search intent */
     intent: SearchIntent | null;
-    /** Deterministic fallback files (returned if Gemini fails or returns 0 results) */
+    /** Always empty — deterministic fallback is removed */
     fallbackFiles: AffectedFile[];
-}
-
-// ── Vague issue: AI-assisted intent enrichment ────────────────────────────────
-
-/**
- * For vague issues, ask Gemini to extract domain intent from the issue text
- * before running graph traversal.
- *
- * This is a lightweight "meta-AI" call — not the main mapping call.
- * We ask Gemini to identify:
- *   - What domain this issue is about
- *   - Key entities and operations
- *
- * The response is a plain string that we feed back into extractSearchIntent
- * to enrich the SearchIntent with AI-identified terms.
- *
- * Why this approach:
- *   - Keeps the SearchIntent type consistent (no special vague path later)
- *   - The same graph traversal and snippet fetching works for both paths
- *   - The AI reads the issue properly first, preventing keyword-noise traversal
- */
-async function enrichIntentWithAI(issue: IssueContextInput): Promise<string> {
-    if (!config.gemini.apiKey) return "";
-
-    try {
-        const client = new GoogleGenerativeAI(config.gemini.apiKey);
-        const model = client.getGenerativeModel({
-            model: "gemini-2.5-pro",
-            generationConfig: { temperature: 0.1 },
-        });
-
-        const prompt = `You are analyzing a software issue to identify the domain context.
-
-Issue title: ${issue.title}
-Issue body: ${issue.body.slice(0, 1000)}
-${issue.comments.length > 0 ? `\nComments: ${issue.comments.slice(0, 3).map(c => c.body.slice(0, 200)).join(" | ")}` : ""}
-
-The issue description is vague. Identify the most specific domain concepts:
-- What is this issue REALLY about? (in 3-5 concrete technical terms)
-- What operations are involved? (create, update, delete, fetch, etc.)
-- What data or UI elements are affected?
-
-Respond with a single sentence of space-separated technical keywords only.
-Example: "event agenda createAgendaItem updateAgendaItem creator permission"
-Do not explain, just output keywords.`;
-
-        const result = await model.generateContent(prompt);
-        const text = result.response.text().trim();
-        console.log(`[issuePipeline] AI-enriched intent for vague issue: "${text.slice(0, 100)}"`);
-        return text;
-    } catch (err) {
-        console.warn("[issuePipeline] AI intent enrichment failed:", (err as Error).message);
-        return "";
-    }
 }
 
 // ── RetrievalIndex loader ─────────────────────────────────────────────────────
 
-/**
- * Load the RetrievalIndex from Redis.
- *
- * Returns null if:
- *   - Redis is unavailable
- *   - The key doesn't exist (repo analyzed before Phase 1 shipped)
- *   - The stored JSON is malformed
- *
- * All failures are non-fatal — the pipeline falls back gracefully.
- */
 async function loadRetrievalIndex(owner: string, repo: string): Promise<RetrievalIndex | null> {
     try {
         const key = `retrieval:${owner}:${repo}`;
         const raw = await redisConnection.get(key);
         if (!raw) {
-            console.log(`\x1b[33m[issuePipeline] no retrieval index in Redis for ${owner}/${repo} — using fallback\x1b[0m`);
+            console.log(`\x1b[33m[issuePipeline] no retrieval index in Redis for ${owner}/${repo} — using legacy\x1b[0m`);
             return null;
         }
         const index = JSON.parse(raw) as RetrievalIndex;
@@ -183,79 +104,110 @@ async function loadRetrievalIndex(owner: string, repo: string): Promise<Retrieva
     }
 }
 
-// ── New pipeline path (uses RetrievalIndex + real code) ──────────────────────
+// ── Stage 3: Iterative Gemini mapping ─────────────────────────────────────────
 
 /**
- * Execute the full Phase 2 pipeline:
- *   Intent extraction → Graph traversal → Snippet fetching → Gemini reasoning
+ * Execute Stage 3: fetch snippets, send to Gemini, optionally do Round 2.
  *
- * This is the "happy path" — called when the RetrievalIndex is available.
+ * @param candidates  All candidates from Stage 1 + Stage 2 combined
+ * @param retrieval   RetrievalIndex for function metadata
+ * @param intent      SearchIntent for token-based function selection
+ * @param input       PipelineInput for GitHub fetch params
+ * @returns           GeminiMappingResult and total snippet count
  */
-async function runNewPipeline(
-    input: PipelineInput,
+async function runStage3(
+    candidates: CandidateFileEntry[],
     retrieval: RetrievalIndex,
     intent: SearchIntent,
+    input: PipelineInput,
 ): Promise<{ geminiResult: GeminiMappingResult | null; snippetCount: number }> {
-    // ── Stage 2: Graph traversal ──────────────────────────────────────────────
-    let candidates: CandidateSet;
-    try {
-        candidates = traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds);
-        console.log(
-            `\x1b[34m[issuePipeline] graph traversal found ${candidates.files.length} candidates ` +
-            `(${candidates.files.filter(f => f.source === "pr").length} from PRs)\x1b[0m`
-        );
-        console.log(`\x1b[36m[issuePipeline] CANDIDATE FILES:\n${candidates.files.map(c => `  - [${c.source}] ${c.fileId}`).join("\n")}\x1b[0m`);
-    } catch (err) {
-        console.warn("\x1b[31m[issuePipeline] graph traversal failed:\x1b[0m", (err as Error).message);
-        return { geminiResult: null, snippetCount: 0 };
-    }
-
-    if (candidates.files.length === 0) {
-        console.warn("\x1b[33m[issuePipeline] no candidates found — returning null\x1b[0m");
-        return { geminiResult: null, snippetCount: 0 };
-    }
-
-    // ── Stage 3: Snippet fetching ─────────────────────────────────────────────
+    // ── Round 1: Initial snippet fetch + Gemini ───────────────────────────────
     let snippets: CodeSnippet[] = [];
     try {
         snippets = await fetchSnippets(
-            candidates.files,
+            candidates,
             retrieval,
             intent,
             input.owner,
             input.repo,
             input.commitSha,
         );
-        console.log(`\x1b[32m[issuePipeline] fetched ${snippets.length} snippets\x1b[0m`);
+        console.log(`\x1b[32m[issuePipeline] Round 1: fetched ${snippets.length} snippets\x1b[0m`);
     } catch (err) {
-        console.warn("\x1b[31m[issuePipeline] snippet fetching failed:\x1b[0m", (err as Error).message);
-        // Non-fatal — proceed with empty snippets (Gemini will still see the issue text)
+        console.warn("\x1b[31m[issuePipeline] Round 1 snippet fetching failed:\x1b[0m", (err as Error).message);
     }
 
-    // ── Stage 4: Gemini reasoning ─────────────────────────────────────────────
-    let geminiResult: GeminiMappingResult | null = null;
-    try {
-        geminiResult = await callGeminiForMapping(input.issue, snippets, input.linkedPRs);
-        if (geminiResult && geminiResult.affectedFiles.length > 0) {
-            console.log(`\x1b[35m[issuePipeline] AI RETURNED FILES:\n${geminiResult.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
+    const round1 = await callGeminiForMappingRound1(input.issue, snippets, input.linkedPRs);
+
+    if (!round1) {
+        console.log("\x1b[31m[issuePipeline] Round 1 Gemini call returned null\x1b[0m");
+        return { geminiResult: null, snippetCount: snippets.length };
+    }
+
+    // ── Check if Gemini is satisfied ──────────────────────────────────────────
+    if (!round1.needsMoreContext) {
+        // Gemini gave a final answer in Round 1
+        if (round1.affectedFiles.length > 0) {
+            console.log(`\x1b[35m[issuePipeline] Round 1 FINAL — AI returned ${round1.affectedFiles.length} files:\n${round1.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
         } else {
-            console.log(`\x1b[31m[issuePipeline] AI RETURNED 0 FILES\x1b[0m`);
+            console.log("\x1b[31m[issuePipeline] Round 1 FINAL — AI returned 0 files\x1b[0m");
         }
-    } catch (err) {
-        console.warn("\x1b[31m[issuePipeline] Gemini mapping failed:\x1b[0m", (err as Error).message);
+        return {
+            geminiResult: {
+                affectedFiles: round1.affectedFiles,
+                summary: round1.summary,
+                fixApproach: round1.fixApproach,
+            },
+            snippetCount: snippets.length,
+        };
     }
 
-    return { geminiResult, snippetCount: snippets.length };
+    // ── Round 2: Gemini requested more files ──────────────────────────────────
+    console.log(
+        `\x1b[33m[issuePipeline] Round 2 triggered — Gemini wants ${round1.requestedFiles.length} more files: ` +
+        `${round1.reason}\x1b[0m`
+    );
+    console.log(`\x1b[36m[issuePipeline] Requested files:\n${round1.requestedFiles.map(f => `  - ${f}`).join("\n")}\x1b[0m`);
+
+    // Build candidates from Gemini's requested file list
+    const round2Candidates: CandidateFileEntry[] = round1.requestedFiles
+        .filter(fileId => input.graphFileIds.has(fileId)) // only files we know about
+        .map(fileId => ({ fileId, source: "gemini-directed" as const }));
+
+    let round2Snippets: CodeSnippet[] = [];
+    try {
+        round2Snippets = await fetchSnippets(
+            round2Candidates,
+            retrieval,
+            intent,
+            input.owner,
+            input.repo,
+            input.commitSha,
+        );
+        console.log(`\x1b[32m[issuePipeline] Round 2: fetched ${round2Snippets.length} additional snippets\x1b[0m`);
+    } catch (err) {
+        console.warn("\x1b[31m[issuePipeline] Round 2 snippet fetching failed:\x1b[0m", (err as Error).message);
+    }
+
+    // Combine all snippets and get final answer
+    const allSnippets = [...snippets, ...round2Snippets];
+    const totalSnippets = allSnippets.length;
+
+    const finalResult = await callGeminiForMappingFinal(input.issue, allSnippets, input.linkedPRs);
+
+    if (finalResult && finalResult.affectedFiles.length > 0) {
+        console.log(`\x1b[35m[issuePipeline] Round 2 FINAL — AI returned ${finalResult.affectedFiles.length} files:\n${finalResult.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
+    } else {
+        console.log("\x1b[31m[issuePipeline] Round 2 FINAL — AI returned 0 files\x1b[0m");
+    }
+
+    return { geminiResult: finalResult, snippetCount: totalSnippets };
 }
 
-// ── Legacy fallback path ──────────────────────────────────────────────────────
+// ── Legacy fallback ───────────────────────────────────────────────────────────
 
 /**
- * Execute the legacy pipeline (Phase 1 behavior).
- * Used when RetrievalIndex is not available.
- *
- * @deprecated This path exists for backward compatibility only.
- * It sends filenames to Gemini rather than code snippets.
+ * @deprecated Backward compat for repos without RetrievalIndex.
  */
 async function runLegacyPipeline(
     input: PipelineInput,
@@ -264,7 +216,7 @@ async function runLegacyPipeline(
 
     const geminiResult = await callGeminiForMapping(
         input.issue,
-        [], // no snippets available in legacy path
+        [],
         input.linkedPRs,
     );
 
@@ -274,16 +226,11 @@ async function runLegacyPipeline(
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 /**
- * Run the complete issue mapping pipeline.
+ * Run the complete 3-stage issue mapping pipeline.
  *
- * This is the single entry point called by the route handler.
- * The route handler (routes/issueMap.ts) is untouched in Phase 2.
- *
- * Flow:
- *   1. Load RetrievalIndex from Redis
- *   2. If available → run new pipeline
- *   3. If not → run legacy pipeline for backward compat
- *   4. Return PipelineResult to the route handler
+ * Stage 1: Token traversal (free) → candidates
+ * Stage 2: Gemini graph navigation (only if Stage 1 insufficient)
+ * Stage 3: Gemini-directed snippet fetching (max 2 rounds)
  *
  * @param input    All inputs needed for the pipeline
  * @returns        PipelineResult with Gemini output and diagnostic metadata
@@ -291,43 +238,22 @@ async function runLegacyPipeline(
 export async function runIssueMappingPipeline(
     input: PipelineInput,
 ): Promise<PipelineResult> {
-    // We compute this ALWAYS, so that if Gemini fails or returns 0 files,
-    // we return an empty array because we removed the deterministic engine dependency.
-    let fallbackFiles: AffectedFile[] = [];
+    const fallbackFiles: AffectedFile[] = []; // deterministic fallback removed
 
-    // ── Stage 1: Intent extraction ────────────────────────────────────────────
+    // ── Stage 1: Token extraction + graph traversal ───────────────────────────
     const commentBodies = input.issue.comments.map(c => c.body);
-    let intent = extractSearchIntent(input.issue.title, input.issue.body, commentBodies);
+    const intent = extractSearchIntent(input.issue.title, input.issue.body, commentBodies);
 
     console.log(
-        `\x1b[32m[issuePipeline] intent extracted — ` +
-        `entities: ${intent.entities.slice(0, 5).join(", ")}, ` +
-        `isVague: ${intent.isVague}\x1b[0m`
+        `\x1b[32m[issuePipeline] STAGE 1 — intent extracted: ` +
+        `entities=[${intent.entities.slice(0, 8).join(", ")}], ` +
+        `isVague=${intent.isVague}\x1b[0m`
     );
 
-    // ── Stage 1b: Vague issue path — AI-assisted intent enrichment ────────────
-    if (intent.isVague) {
-        console.log("[issuePipeline] issue is vague — enriching intent with AI");
-        const aiKeywords = await enrichIntentWithAI(input.issue);
-        if (aiKeywords) {
-            // Re-run intent extraction with AI keywords appended to the body
-            intent = extractSearchIntent(
-                input.issue.title,
-                input.issue.body + "\n\n" + aiKeywords,
-                commentBodies,
-            );
-            // Even if still "vague" after enrichment, the extra keywords help traversal
-            console.log(
-                `[issuePipeline] enriched intent — entities: ${intent.entities.slice(0, 5).join(", ")}`
-            );
-        }
-    }
-
-    // ── Load RetrievalIndex ───────────────────────────────────────────────────
+    // Load RetrievalIndex
     const retrieval = await loadRetrievalIndex(input.owner, input.repo);
 
     if (!retrieval) {
-        // No retrieval index — use legacy pipeline
         const { geminiResult, snippetCount } = await runLegacyPipeline(input);
         return {
             geminiResult,
@@ -339,9 +265,86 @@ export async function runIssueMappingPipeline(
         };
     }
 
-    // ── Run new pipeline ──────────────────────────────────────────────────────
+    // Token-based graph traversal
+    let candidates: CandidateSet;
     try {
-        const { geminiResult, snippetCount } = await runNewPipeline(input, retrieval, intent);
+        candidates = traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds);
+        console.log(
+            `\x1b[34m[issuePipeline] STAGE 1 — graph traversal found ${candidates.files.length} candidates ` +
+            `(${candidates.files.filter(f => f.source === "pr").length} from PRs)\x1b[0m`
+        );
+        console.log(`\x1b[36m[issuePipeline] STAGE 1 CANDIDATES:\n${candidates.files.map(c => `  - [${c.source}] ${c.fileId}`).join("\n")}\x1b[0m`);
+    } catch (err) {
+        console.warn("\x1b[31m[issuePipeline] STAGE 1 graph traversal failed:\x1b[0m", (err as Error).message);
+        // Fall back to legacy
+        const { geminiResult, snippetCount } = await runLegacyPipeline(input);
+        return {
+            geminiResult,
+            usedNewPipeline: false,
+            snippetCount,
+            isVague: intent.isVague,
+            intent,
+            fallbackFiles,
+        };
+    }
+
+    // ── Stage 2: Gemini graph navigation (only if Stage 1 insufficient) ──────
+    if (candidates.files.length < MIN_CANDIDATES_FOR_STAGE1) {
+        console.log(
+            `\x1b[33m[issuePipeline] STAGE 2 — only ${candidates.files.length} candidates from Stage 1 ` +
+            `(need ${MIN_CANDIDATES_FOR_STAGE1}), sending graph map to Gemini\x1b[0m`
+        );
+
+        try {
+            const graphMap = buildCompactGraphMap(retrieval);
+            console.log(`\x1b[36m[issuePipeline] STAGE 2 — graph map: ${graphMap.split("\n").length} files, ${graphMap.length} chars\x1b[0m`);
+
+            const requestedFiles = await callGeminiForGraphNavigation(input.issue, graphMap);
+
+            if (requestedFiles.length > 0) {
+                // Add Gemini-directed files to the candidate set
+                const existingIds = new Set(candidates.files.map(c => c.fileId));
+                const newCandidates: CandidateFileEntry[] = requestedFiles
+                    .filter(fileId => !existingIds.has(fileId) && input.graphFileIds.has(fileId))
+                    .map(fileId => ({ fileId, source: "gemini-directed" as const }));
+
+                candidates.files.push(...newCandidates);
+                console.log(
+                    `\x1b[32m[issuePipeline] STAGE 2 — added ${newCandidates.length} Gemini-directed candidates ` +
+                    `(total: ${candidates.files.length})\x1b[0m`
+                );
+                console.log(`\x1b[36m[issuePipeline] STAGE 2 NEW CANDIDATES:\n${newCandidates.map(c => `  - [gemini-directed] ${c.fileId}`).join("\n")}\x1b[0m`);
+            } else {
+                console.log("\x1b[33m[issuePipeline] STAGE 2 — Gemini returned 0 additional files\x1b[0m");
+            }
+        } catch (err) {
+            console.warn("\x1b[31m[issuePipeline] STAGE 2 failed:\x1b[0m", (err as Error).message);
+            // Non-fatal — proceed with Stage 1 candidates only
+        }
+    } else {
+        console.log(
+            `\x1b[32m[issuePipeline] STAGE 1 sufficient (${candidates.files.length} >= ${MIN_CANDIDATES_FOR_STAGE1}) — skipping Stage 2\x1b[0m`
+        );
+    }
+
+    // ── Stage 3: Iterative Gemini mapping ─────────────────────────────────────
+    if (candidates.files.length === 0) {
+        console.log("\x1b[31m[issuePipeline] no candidates after Stage 1 + 2 — returning empty\x1b[0m");
+        return {
+            geminiResult: null,
+            usedNewPipeline: true,
+            snippetCount: 0,
+            isVague: intent.isVague,
+            intent,
+            fallbackFiles,
+        };
+    }
+
+    try {
+        console.log(`\x1b[34m[issuePipeline] STAGE 3 — starting iterative mapping with ${candidates.files.length} candidates\x1b[0m`);
+        const { geminiResult, snippetCount } = await runStage3(
+            candidates.files, retrieval, intent, input
+        );
         return {
             geminiResult,
             usedNewPipeline: true,
@@ -351,11 +354,7 @@ export async function runIssueMappingPipeline(
             fallbackFiles,
         };
     } catch (err) {
-        // Unexpected failure in new pipeline — degrade to legacy
-        console.error(
-            "[issuePipeline] new pipeline threw unexpectedly, falling back to legacy:",
-            (err as Error).message
-        );
+        console.error("\x1b[31m[issuePipeline] Stage 3 threw unexpectedly:\x1b[0m", (err as Error).message);
         const { geminiResult, snippetCount } = await runLegacyPipeline(input);
         return {
             geminiResult,
