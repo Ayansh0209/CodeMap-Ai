@@ -1,7 +1,40 @@
 # CodeMap AI
-A friendly, deterministic map for open source newcomers.
+CodeMap AI helps developers — especially **beginners in open source** — understand **large repositories faster** without getting lost trying to figure out where to start.
 
-CodeMap AI helps you understand a large codebase fast so you can contribute confidently instead of getting lost in the repo. The parsing engine is 100% deterministic and does not use AI to infer structure. AI is only used to explain results and help you reason about issues based on the real, parsed graph.
+Instead of manually searching through hundreds of files, CodeMap AI helps you:
+
+- visualize **repository structure** and **file relationships**
+- understand **function flow** and **import flow**
+- **map GitHub issues** to potentially affected files
+- explore connected code through a **graph-based view**
+- ask **repository-aware AI questions** grounded in the actual codebase
+
+##  Issue Mapping
+
+One of the hardest parts of contributing to open source is figuring out:
+
+- Which files are actually related to this issue?
+- Where should I start reading?
+- Which functions/files are connected?
+
+The **Issue Mapping** system tries to give contributors a starting point by identifying files and functions likely related to a GitHub issue using the **repository graph** and retrieved code context.
+
+## How it works
+
+The repository graph and relationships are generated using a fully **deterministic parser** — not AI guesses.
+
+AI is only used on top of the parsed graph to:
+- explain repository flow
+- help reason about issues
+- help navigate the codebase
+
+The AI chat system uses a **graph-guided retrieval** approach inspired by **code review graph systems**, which helps reduce token usage while improving **repository-grounded responses**.
+
+> ⚠️ **CodeMap AI is still evolving** and may contain bugs or incorrect mappings in some cases.  
+> If you find something broken or have ideas/features that could improve the project, feel free to open an issue or contribute.
+
+ **If you find the project useful, consider starring the repository.**
+If you find the project useful, consider starring the repository ⭐
 
 > Note: I may change the name in the future or you can suggest a good name
 
@@ -14,12 +47,17 @@ Here’s a sneak peek at what CodeMap AI gives you:
 
 ![File dependency graph example](frontend/public/image.png)
 *Visualizing real file dependencies in a large codebase.*
+<img width="1919" height="906" alt="image" src="https://github.com/user-attachments/assets/bcdba9dd-a3f7-4afb-9296-b0265c9b617b" />
+The files affected or need change for a particlaur issue and by using ai chat you can correct it 
 
 ![Function call graph example](frontend/public/image-1.png)
 *See which functions call which, with direct links to the code.*
 
 ![Issue mapping example](frontend/public/image-2.png)
 *Map GitHub issues to the files that matter most for a fix.*
+
+
+
 
 ## Key features
 
