@@ -19,7 +19,7 @@
 //   What stays the same:
 //     - fetchRawFileCached() — GitHub + Redis caching
 //     - sliceFunctionBody() — line-based extraction
-//     - semanticTruncate() — for pathologically large functions
+//     - semanticTruncate() — simple head+tail truncation
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { RetrievalIndex, RetrievalFileEntry, RetrievalFunction } from "../models/retrieval";
@@ -62,11 +62,7 @@ export interface CodeSnippet {
  */
 const MAX_FUNCTIONS_PER_FILE = 5;
 
-/**
- * Pathological function threshold (lines).
- * Functions longer than this get semantic truncation applied.
- */
-const HUGE_FUNCTION_LINES = 300;
+
 
 /**
  * Redis TTL for raw file cache (1 hour).
@@ -171,95 +167,24 @@ function selectFunctions(
 /**
  * Patterns that identify high-signal lines worth preserving in truncation.
  */
-const HIGH_SIGNAL_LINE_PATTERNS = [
-    /\b(checkAuth|requireAuth|verifyAuth|isAuthenticated|hasPermission|checkPermission|requireRole)\s*\(/i,
-    /\b(context|ctx|req)\.(user|currentUser|viewer)\b/i,
-    /throw\s+new\s+\w*(Unauthorized|Forbidden|AuthorizationError|AccessDenied)/i,
-    /\.(findOne|findMany|findFirst|findAll|findById|findUnique|create|createMany|save|update|upsert|delete|deleteOne|deleteMany|destroy|insert)\s*\(/i,
-    /\b(db|pool|client|prisma|repository)\.(select|insert|update|delete|query)\s*\(/i,
-    /throw\s+new\s+\w*Error/i,
-    /throw\s+new\s+\w*Exception/i,
-    /^\s*return\s+/,
-    /\bawait\s+\w/,
-];
-
 /**
- * Patterns that identify low-signal lines safe to drop in truncation.
- */
-const LOW_SIGNAL_LINE_PATTERNS = [
-    /^\s*\/\//,
-    /^\s*\*\s/,
-    /^\s*\/\*/,
-    /^\s*\*\//,
-    /^\s*$/,
-    /^\s*console\.(log|debug|warn|info)\s*\(/,
-];
-
-function isHighSignal(line: string): boolean {
-    return HIGH_SIGNAL_LINE_PATTERNS.some(p => p.test(line));
-}
-
-function isLowSignal(line: string): boolean {
-    return LOW_SIGNAL_LINE_PATTERNS.some(p => p.test(line));
-}
-
-/**
- * Semantic-aware truncation for pathologically large functions.
- *
- * Strategy:
- *   1. Always keep first 10 lines (signature + early logic)
- *   2. Always keep last 10 lines (return values + closing)
- *   3. From middle: keep high-signal lines + 2-line context
- *   4. Drop low-signal lines
- *   5. Insert omission markers at cut points
+ * Simple truncation for pathologically large functions.
+ * Returns the first 60 lines, an omission comment, and the last 20 lines.
+ * If the input is 80 lines or fewer, returns it unchanged.
  */
 function semanticTruncate(body: string): string {
     const lines = body.split("\n");
-    if (lines.length <= HUGE_FUNCTION_LINES) return body;
+    if (lines.length <= 80) return body;
 
-    const HEAD_LINES = 10;
-    const TAIL_LINES = 10;
-    const CONTEXT_AROUND_HIGH_SIGNAL = 2;
+    const head = lines.slice(0, 60);
+    const tail = lines.slice(-20);
+    const omitted = lines.length - 80;
 
-    const head = lines.slice(0, HEAD_LINES);
-    const tail = lines.slice(-TAIL_LINES);
-    const middle = lines.slice(HEAD_LINES, lines.length - TAIL_LINES);
-
-    const keepIndices = new Set<number>();
-    for (let i = 0; i < middle.length; i++) {
-        if (isHighSignal(middle[i])) {
-            for (let j = Math.max(0, i - CONTEXT_AROUND_HIGH_SIGNAL);
-                j <= Math.min(middle.length - 1, i + CONTEXT_AROUND_HIGH_SIGNAL);
-                j++) {
-                keepIndices.add(j);
-            }
-        }
-    }
-
-    const truncatedMiddle: string[] = [];
-    let lastKept = -1;
-
-    const sortedIndices = [...keepIndices].sort((a, b) => a - b);
-    for (const idx of sortedIndices) {
-        if (isLowSignal(middle[idx])) continue;
-
-        if (lastKept !== -1 && idx > lastKept + 1) {
-            const omitted = idx - lastKept - 1;
-            truncatedMiddle.push(`  // ... [${omitted} lines omitted] ...`);
-        }
-
-        truncatedMiddle.push(middle[idx]);
-        lastKept = idx;
-    }
-
-    if (keepIndices.size < middle.length) {
-        const remaining = middle.length - (lastKept + 1);
-        if (remaining > 0) {
-            truncatedMiddle.push(`  // ... [${remaining} more lines omitted] ...`);
-        }
-    }
-
-    return [...head, ...truncatedMiddle, ...tail].join("\n");
+    return [
+        ...head,
+        `// ... [${omitted} lines omitted] ...`,
+        ...tail,
+    ].join("\n");
 }
 
 // ── Raw file caching ──────────────────────────────────────────────────────────

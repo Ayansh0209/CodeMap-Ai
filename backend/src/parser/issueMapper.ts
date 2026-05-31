@@ -54,6 +54,7 @@ export interface CandidateFileEntry {
     fileId: string;
     /** How this file entered the candidate set */
     source: "pr" | "keyword" | "barrel-expansion" | "neighborhood" | "gemini-directed";
+    score?: number; // Optional score field
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -145,47 +146,68 @@ function expandBarrels(
     return expanded;
 }
 
-// ── Neighborhood expansion ────────────────────────────────────────────────────
+// ── Neighborhood expansion (Scored BFS) ───────────────────────────────────────
 
-/**
- * Add one-hop neighbors (importedBy + imports) for each candidate file.
- *
- * Reasoning: the bug might be in a file that imports the matched file,
- * or in a dependency the matched file relies on.
- *
- * Filters out noise paths (test files, declarations) from neighborhood.
- */
-function addNeighborhood(
-    directCandidates: Set<string>,
+interface BFSSeed {
+    fileId: string;
+    score: number;
+}
+
+function runBFS(
+    seeds: BFSSeed[],
     fileMap: Map<string, RetrievalFileEntry>,
-    maxToAdd: number,
-): Set<string> {
-    const result = new Set<string>(directCandidates);
-    let added = 0;
+    graphFileIds: Set<string>,
+): Array<{ fileId: string; score: number }> {
+    const scores = new Map<string, number>();
 
-    for (const fileId of directCandidates) {
-        if (added >= maxToAdd) break;
-        const entry = fileMap.get(fileId);
-        if (!entry) continue;
-
-        // importedBy: files that call INTO our candidate
-        for (const importer of entry.importedBy.slice(0, 3)) {
-            if (!result.has(importer) && added < maxToAdd && !isNoisePath(importer)) {
-                result.add(importer);
-                added++;
-            }
-        }
-
-        // imports: dependencies this candidate relies on
-        for (const dep of entry.imports.slice(0, 2)) {
-            if (!result.has(dep) && added < maxToAdd && !isNoisePath(dep)) {
-                result.add(dep);
-                added++;
-            }
-        }
+    // Level 0 (Hops 0)
+    let currentLevel = new Map<string, number>();
+    for (const seed of seeds) {
+        currentLevel.set(seed.fileId, (currentLevel.get(seed.fileId) ?? 0) + seed.score);
+        scores.set(seed.fileId, (scores.get(seed.fileId) ?? 0) + seed.score);
     }
 
-    return result;
+    // Run for maximum 2 hops
+    for (let hop = 0; hop < 2; hop++) {
+        const nextLevel = new Map<string, number>();
+
+        for (const [fileId, currentScore] of currentLevel.entries()) {
+            const entry = fileMap.get(fileId);
+            if (!entry) continue;
+
+            // Collect neighbors from three sources
+            const neighbors = new Set<string>();
+            for (const imp of entry.importedBy) neighbors.add(imp);
+            for (const dep of entry.imports) neighbors.add(dep);
+            for (const fn of entry.functions) {
+                for (const call of fn.calls) {
+                    const path = call.split("::")[0];
+                    if (path) neighbors.add(path);
+                }
+            }
+
+            for (const neighborId of neighbors) {
+                if (neighborId === fileId) continue;
+                if (!graphFileIds.has(neighborId)) continue;
+                if (isNoisePath(neighborId)) continue;
+
+                const incomingScore = currentScore * 0.6;
+                if (incomingScore < 15) continue; // Skip if incoming score is below 15
+
+                scores.set(neighborId, (scores.get(neighborId) ?? 0) + incomingScore);
+                nextLevel.set(neighborId, (nextLevel.get(neighborId) ?? 0) + incomingScore);
+            }
+        }
+
+        currentLevel = nextLevel;
+    }
+
+    // Sort descending and return top MAX_TOTAL_CANDIDATES
+    const sorted = Array.from(scores.entries())
+        .map(([fileId, score]) => ({ fileId, score }))
+        .sort((a, b) => b.score - a.score);
+
+    return sorted.slice(0, MAX_TOTAL_CANDIDATES);
 }
 
 // ── Core graph traversal ──────────────────────────────────────────────────────
@@ -198,8 +220,9 @@ function addNeighborhood(
  *   2. For each file in the index: check if file path or any function name
  *      matches any token from the intent (pure substring, no scoring)
  *   3. Expand barrel files to their real targets
- *   4. Add one-hop neighborhood (importedBy + imports)
- *   5. Assemble unordered candidate set
+ *   4. Build seeds list from PR files and keyword matches (after barrel expansion)
+ *   5. Run BFS scored expansion
+ *   6. Assemble candidate set sorted by score descending
  */
 function traverseRetrievalGraph(
     intent: SearchIntent,
@@ -253,48 +276,50 @@ function traverseRetrievalGraph(
     // ── Barrel expansion ──────────────────────────────────────────────────────
     const afterExpansion = expandBarrels(cappedMatches, fileMap);
 
-    // ── Neighborhood expansion ────────────────────────────────────────────────
-    const maxNeighbors = MAX_TOTAL_CANDIDATES - prFileIds.size - afterExpansion.size;
-    const withNeighborhood = addNeighborhood(afterExpansion, fileMap, Math.max(0, maxNeighbors));
+    // ── Build seed list with priorities: pr (120) > keyword (100) > barrel-expansion (80) ──
+    const seedsMap = new Map<string, { score: number; source: CandidateFileEntry["source"] }>();
 
-    // ── Assemble candidate set ────────────────────────────────────────────────
-    const files: CandidateFileEntry[] = [];
-    const seen = new Set<string>();
-
-    // PR files first
+    // 1. PR files (highest priority)
     for (const fileId of prFileIds) {
-        if (!seen.has(fileId)) {
-            files.push({ fileId, source: "pr" });
-            seen.add(fileId);
-        }
+        seedsMap.set(fileId, { score: 120, source: "pr" });
     }
 
-    // Direct keyword matches (excluding barrels that were expanded)
+    // 2. Keyword-matched files (excluding barrels that were expanded)
     for (const fileId of cappedMatches) {
-        if (seen.has(fileId)) continue;
         const entry = fileMap.get(fileId);
         if (entry?.isBarrel) continue;
-        files.push({ fileId, source: "keyword" });
-        seen.add(fileId);
-    }
-
-    // Barrel expansion targets
-    for (const fileId of afterExpansion) {
-        if (seen.has(fileId)) continue;
-        if (!cappedMatches.has(fileId)) {
-            files.push({ fileId, source: "barrel-expansion" });
-            seen.add(fileId);
+        if (!seedsMap.has(fileId)) {
+            seedsMap.set(fileId, { score: 100, source: "keyword" });
         }
     }
 
-    // Neighborhood files
-    for (const fileId of withNeighborhood) {
-        if (seen.has(fileId)) continue;
-        files.push({ fileId, source: "neighborhood" });
-        seen.add(fileId);
+    // 3. Barrel expansion targets
+    for (const fileId of afterExpansion) {
+        if (!seedsMap.has(fileId)) {
+            seedsMap.set(fileId, { score: 80, source: "barrel-expansion" });
+        }
     }
 
-    return { files: files.slice(0, MAX_TOTAL_CANDIDATES), usedRetrievalIndex: true };
+    const bfsSeeds = Array.from(seedsMap.entries()).map(([fileId, seed]) => ({
+        fileId,
+        score: seed.score,
+    }));
+
+    // ── Scored BFS Neighborhood expansion ─────────────────────────────────────
+    const bfsResults = runBFS(bfsSeeds, fileMap, graphFileIds);
+
+    // ── Assemble candidate set ────────────────────────────────────────────────
+    const files: CandidateFileEntry[] = bfsResults.map(res => {
+        const seed = seedsMap.get(res.fileId);
+        const source = seed ? seed.source : ("neighborhood" as const);
+        return {
+            fileId: res.fileId,
+            source,
+            score: res.score,
+        };
+    });
+
+    return { files, usedRetrievalIndex: true };
 }
 
 // ── Main entry point ──────────────────────────────────────────────────────────

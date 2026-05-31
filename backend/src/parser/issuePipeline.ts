@@ -27,7 +27,7 @@
 
 import { extractSearchIntent } from "./issueUnderstanding";
 import type { SearchIntent } from "./issueUnderstanding";
-import { traverseGraph, buildCompactGraphMap, MIN_CANDIDATES_FOR_STAGE1 } from "./issueMapper";
+import { traverseGraph, buildCompactGraphMap } from "./issueMapper";
 import type { CandidateSet, CandidateFileEntry } from "./issueMapper";
 import { fetchSnippets } from "./snippetFetcher";
 import type { CodeSnippet } from "./snippetFetcher";
@@ -195,13 +195,19 @@ async function runStage3(
 
     const finalResult = await callGeminiForMappingFinal(input.issue, allSnippets, input.linkedPRs);
 
-    if (finalResult && finalResult.affectedFiles.length > 0) {
-        console.log(`\x1b[35m[issuePipeline] Round 2 FINAL — AI returned ${finalResult.affectedFiles.length} files:\n${finalResult.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
+    let geminiResult = finalResult;
+    if (!geminiResult || geminiResult.affectedFiles.length === 0) {
+        console.log("\x1b[33m[issuePipeline] Round 2 failed or returned 0 files. Falling back to Round 1 results.\x1b[0m");
+        geminiResult = {
+            affectedFiles: round1.affectedFiles,
+            summary: round1.summary,
+            fixApproach: round1.fixApproach,
+        };
     } else {
-        console.log("\x1b[31m[issuePipeline] Round 2 FINAL — AI returned 0 files\x1b[0m");
+        console.log(`\x1b[35m[issuePipeline] Round 2 FINAL — AI returned ${geminiResult.affectedFiles.length} files:\n${geminiResult.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
     }
 
-    return { geminiResult: finalResult, snippetCount: totalSnippets };
+    return { geminiResult, snippetCount: totalSnippets };
 }
 
 // ── Legacy fallback ───────────────────────────────────────────────────────────
@@ -265,15 +271,34 @@ export async function runIssueMappingPipeline(
         };
     }
 
-    // Token-based graph traversal
-    let candidates: CandidateSet;
+    // Run Stage 1 and Stage 2 in parallel
+    let stage1Candidates: CandidateSet;
+    let stage2RequestedFiles: string[] = [];
+
     try {
-        candidates = traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds);
-        console.log(
-            `\x1b[34m[issuePipeline] STAGE 1 — graph traversal found ${candidates.files.length} candidates ` +
-            `(${candidates.files.filter(f => f.source === "pr").length} from PRs)\x1b[0m`
+        const stage1Promise = Promise.resolve().then(() =>
+            traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds)
         );
-        console.log(`\x1b[36m[issuePipeline] STAGE 1 CANDIDATES:\n${candidates.files.map(c => `  - [${c.source}] ${c.fileId}`).join("\n")}\x1b[0m`);
+        const stage2Promise = (async () => {
+            try {
+                const graphMap = buildCompactGraphMap(retrieval);
+                console.log(`\x1b[36m[issuePipeline] STAGE 2 — graph map: ${graphMap.split("\n").length} files, ${graphMap.length} chars\x1b[0m`);
+                return await callGeminiForGraphNavigation(input.issue, graphMap);
+            } catch (err) {
+                console.warn("\x1b[31m[issuePipeline] STAGE 2 failed:\x1b[0m", (err as Error).message);
+                return [];
+            }
+        })();
+
+        const [s1, s2] = await Promise.all([stage1Promise, stage2Promise]);
+        stage1Candidates = s1;
+        stage2RequestedFiles = s2;
+
+        console.log(
+            `\x1b[34m[issuePipeline] STAGE 1 — graph traversal found ${stage1Candidates.files.length} candidates ` +
+            `(${stage1Candidates.files.filter(f => f.source === "pr").length} from PRs)\x1b[0m`
+        );
+        console.log(`\x1b[34m[issuePipeline] STAGE 2 — Gemini returned ${stage2RequestedFiles.length} files\x1b[0m`);
     } catch (err) {
         console.warn("\x1b[31m[issuePipeline] STAGE 1 graph traversal failed:\x1b[0m", (err as Error).message);
         // Fall back to legacy
@@ -288,47 +313,46 @@ export async function runIssueMappingPipeline(
         };
     }
 
-    // ── Stage 2: Gemini graph navigation (only if Stage 1 insufficient) ──────
-    if (candidates.files.length < MIN_CANDIDATES_FOR_STAGE1) {
-        console.log(
-            `\x1b[33m[issuePipeline] STAGE 2 — only ${candidates.files.length} candidates from Stage 1 ` +
-            `(need ${MIN_CANDIDATES_FOR_STAGE1}), sending graph map to Gemini\x1b[0m`
-        );
+    // Merge and deduplicate candidates based on source priority: pr > keyword > barrel-expansion > neighborhood > gemini-directed
+    const SOURCE_PRIORITY: Record<string, number> = {
+        "pr": 5,
+        "keyword": 4,
+        "barrel-expansion": 3,
+        "neighborhood": 2,
+        "gemini-directed": 1,
+    };
 
-        try {
-            const graphMap = buildCompactGraphMap(retrieval);
-            console.log(`\x1b[36m[issuePipeline] STAGE 2 — graph map: ${graphMap.split("\n").length} files, ${graphMap.length} chars\x1b[0m`);
+    const mergedMap = new Map<string, CandidateFileEntry>();
 
-            const requestedFiles = await callGeminiForGraphNavigation(input.issue, graphMap);
-
-            if (requestedFiles.length > 0) {
-                // Add Gemini-directed files to the candidate set
-                const existingIds = new Set(candidates.files.map(c => c.fileId));
-                const newCandidates: CandidateFileEntry[] = requestedFiles
-                    .filter(fileId => !existingIds.has(fileId) && input.graphFileIds.has(fileId))
-                    .map(fileId => ({ fileId, source: "gemini-directed" as const }));
-
-                candidates.files.push(...newCandidates);
-                console.log(
-                    `\x1b[32m[issuePipeline] STAGE 2 — added ${newCandidates.length} Gemini-directed candidates ` +
-                    `(total: ${candidates.files.length})\x1b[0m`
-                );
-                console.log(`\x1b[36m[issuePipeline] STAGE 2 NEW CANDIDATES:\n${newCandidates.map(c => `  - [gemini-directed] ${c.fileId}`).join("\n")}\x1b[0m`);
-            } else {
-                console.log("\x1b[33m[issuePipeline] STAGE 2 — Gemini returned 0 additional files\x1b[0m");
-            }
-        } catch (err) {
-            console.warn("\x1b[31m[issuePipeline] STAGE 2 failed:\x1b[0m", (err as Error).message);
-            // Non-fatal — proceed with Stage 1 candidates only
-        }
-    } else {
-        console.log(
-            `\x1b[32m[issuePipeline] STAGE 1 sufficient (${candidates.files.length} >= ${MIN_CANDIDATES_FOR_STAGE1}) — skipping Stage 2\x1b[0m`
-        );
+    // Add Stage 1 candidates
+    for (const fileEntry of stage1Candidates.files) {
+        mergedMap.set(fileEntry.fileId, fileEntry);
     }
 
+    // Merge Stage 2 requested files
+    for (const fileId of stage2RequestedFiles) {
+        if (!input.graphFileIds.has(fileId)) continue; // only files we know about
+
+        const newEntry: CandidateFileEntry = { fileId, source: "gemini-directed" as const };
+        const existing = mergedMap.get(fileId);
+
+        if (existing) {
+            const existingPriority = SOURCE_PRIORITY[existing.source] || 0;
+            const newPriority = SOURCE_PRIORITY[newEntry.source] || 0;
+            if (newPriority > existingPriority) {
+                mergedMap.set(fileId, newEntry);
+            }
+        } else {
+            mergedMap.set(fileId, newEntry);
+        }
+    }
+
+    const mergedCandidates = Array.from(mergedMap.values());
+    console.log(`\x1b[32m[issuePipeline] Merged and deduplicated to ${mergedCandidates.length} candidate files\x1b[0m`);
+    console.log(`\x1b[36m[issuePipeline] FINAL MERGED CANDIDATES:\n${mergedCandidates.map(c => `  - [${c.source}] ${c.fileId}`).join("\n")}\x1b[0m`);
+
     // ── Stage 3: Iterative Gemini mapping ─────────────────────────────────────
-    if (candidates.files.length === 0) {
+    if (mergedCandidates.length === 0) {
         console.log("\x1b[31m[issuePipeline] no candidates after Stage 1 + 2 — returning empty\x1b[0m");
         return {
             geminiResult: null,
@@ -341,9 +365,9 @@ export async function runIssueMappingPipeline(
     }
 
     try {
-        console.log(`\x1b[34m[issuePipeline] STAGE 3 — starting iterative mapping with ${candidates.files.length} candidates\x1b[0m`);
+        console.log(`\x1b[34m[issuePipeline] STAGE 3 — starting iterative mapping with ${mergedCandidates.length} candidates\x1b[0m`);
         const { geminiResult, snippetCount } = await runStage3(
-            candidates.files, retrieval, intent, input
+            mergedCandidates, retrieval, intent, input
         );
         return {
             geminiResult,

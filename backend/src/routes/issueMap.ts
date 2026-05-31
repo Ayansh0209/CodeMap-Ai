@@ -430,7 +430,16 @@ router.post("/chat", async (req: Request, res: Response, next: NextFunction) => 
                 `  Changed files: ${pr.changedFiles.slice(0, 10).join(", ")}`
             ).join("\n");
 
+            const instructions = [
+                "You are a senior software engineer assistant. Your behavior depends on what the user is asking in their latest message.",
+                "If the user is asking to fix, solve, implement, or change something — respond with actual code changes: show the file path, the function or block to change, and the replacement code. Do not explain what needs to be done without showing the code.",
+                "If the user is asking to explain, understand, or describe something — give a clear explanation without unnecessary code.",
+                "Always ground your response in the actual file contents provided below."
+            ].join("\n");
+
             systemContext = [
+                instructions,
+                "",
                 `REPOSITORY: ${owner}/${repo}`,
                 issueData
                     ? `ISSUE #${issueNumber}: ${issueData.title}`

@@ -128,7 +128,7 @@ export async function callGeminiForGraphNavigation(
     const model = client.getGenerativeModel({
         model: "gemini-2.5-pro",
         generationConfig: {
-            temperature: 0.1,
+            temperature: 0,
             responseMimeType: "application/json",
         },
     });
@@ -226,7 +226,7 @@ export async function callGeminiForMappingRound1(
     const model = client.getGenerativeModel({
         model: "gemini-2.5-pro",
         generationConfig: {
-            temperature: 0.1,
+            temperature: 0,
             responseMimeType: "application/json",
         },
     });
@@ -266,9 +266,12 @@ ${snippetSection}
 ═══════════════════════════════════════════════
 INSTRUCTIONS
 ═══════════════════════════════════════════════
-Based on the issue and the code snippets above, do ONE of two things:
+Based on the issue and the code snippets above, provide your analysis. The default expected response is Option A (final answer). Option B (needsMoreContext: true) must only be chosen if a file that is absolutely critical to understanding the issue is completely missing from the provided snippets — not just because more context would be nice.
 
-OPTION A — If you can confidently identify the affected files:
+If you have any reasonable basis to identify affected files from what you have, always choose Option A.
+
+OPTION A — Final Answer (Default Expected Response):
+Choose this if you have a reasonable basis to identify affected files.
 Return JSON:
 {
   "needsMoreContext": false,
@@ -285,7 +288,8 @@ Return JSON:
   "fixApproach": "<2-3 sentences on what needs to change>"
 }
 
-OPTION B — If you need to see additional files before answering:
+OPTION B — Request Additional Files:
+Choose this ONLY if a file that is absolutely critical to understanding the issue is completely missing from the provided snippets.
 Return JSON:
 {
   "needsMoreContext": true,
@@ -297,8 +301,8 @@ Return JSON:
 }
 
 IMPORTANT:
-- Only request more files if the snippets truly are insufficient
-- If you have enough context, always choose Option A
+- If you have any reasonable basis to identify affected files from what you have, always choose Option A.
+- Only request more files if the snippets truly are insufficient to provide any initial analysis.
 - Confidence 90+ means you can point to specific lines
 - Confidence 50-70 means you're in the right area but want more context
 - Only include files from the snippets in affectedFiles
@@ -344,7 +348,7 @@ export async function callGeminiForMappingFinal(
     const model = client.getGenerativeModel({
         model: "gemini-2.5-pro",
         generationConfig: {
-            temperature: 0.1,
+            temperature: 0,
             responseMimeType: "application/json",
         },
     });
