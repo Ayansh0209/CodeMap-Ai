@@ -12,10 +12,12 @@
 //   - callGeminiForChatStream() — untouched
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { VertexAI } from "@google-cloud/vertexai";
 import { config } from "../config/config";
 import type { IssueComment, LinkedPR } from "../github/issueClient";
 import type { CodeSnippet } from "./snippetFetcher";
+import * as fs from "fs";
+import * as path from "path";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -64,11 +66,47 @@ export interface IssueContextInput {
 
 // ── Client ────────────────────────────────────────────────────────────────────
 
-let geminiClient: GoogleGenerativeAI | null = null;
-function getClient(): GoogleGenerativeAI | null {
-    if (!config.gemini.apiKey) return null;
-    if (!geminiClient) geminiClient = new GoogleGenerativeAI(config.gemini.apiKey);
-    return geminiClient;
+let vertexClient: VertexAI | null = null;
+function getClient(): VertexAI | null {
+    let project = config.gcp.projectId || process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
+    const location = config.gcp.location || process.env.GCP_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
+
+    const apiJsonPath = path.join(process.cwd(), "api.json");
+    const hasApiJson = fs.existsSync(apiJsonPath);
+
+    let googleAuthOptions: any = undefined;
+    if (hasApiJson) {
+        try {
+            const apiConfig = JSON.parse(fs.readFileSync(apiJsonPath, "utf8"));
+            if (apiConfig.project_id && !project) {
+                project = apiConfig.project_id;
+            }
+            googleAuthOptions = {
+                keyFilename: apiJsonPath
+            };
+        } catch (e) {
+            console.error("Failed to parse api.json:", e);
+        }
+    }
+
+    if (!project) return null;
+    if (!vertexClient) {
+        vertexClient = new VertexAI({ 
+            project, 
+            location,
+            googleAuthOptions
+        });
+    }
+    return vertexClient;
+}
+
+function getText(res: any): string {
+    if (res.text && typeof res.text === "function") {
+        try {
+            return res.text();
+        } catch (e) {}
+    }
+    return res.candidates?.[0]?.content?.parts?.[0]?.text || "";
 }
 
 // ── Logging ───────────────────────────────────────────────────────────────────
@@ -180,7 +218,7 @@ IMPORTANT:
     try {
         const result = await model.generateContent(prompt);
         const res = await result.response;
-        const text = res.text();
+        const text = getText(res);
         logUsage("graph-navigation", res.usageMetadata, prompt, text);
 
         const parsed = JSON.parse(text);
@@ -311,7 +349,7 @@ IMPORTANT:
     try {
         const result = await model.generateContent(prompt);
         const res = await result.response;
-        const text = res.text();
+        const text = getText(res);
         logUsage("mapping-round1", res.usageMetadata, prompt, text);
 
         const parsed = JSON.parse(text);
@@ -407,7 +445,7 @@ Return JSON:
     try {
         const result = await model.generateContent(prompt);
         const res = await result.response;
-        const text = res.text();
+        const text = getText(res);
         logUsage("mapping-final", res.usageMetadata, prompt, text);
 
         const parsed = JSON.parse(text);
@@ -455,11 +493,14 @@ export async function callGeminiForChatStream(
     messages: Array<{ role: string; content: string }>
 ) {
     const client = getClient();
-    if (!client) throw new Error("Gemini key missing");
+    if (!client) throw new Error("Vertex AI client could not be initialized. Please check GCP configuration.");
 
     const model = client.getGenerativeModel({
         model: "gemini-2.5-pro",
-        systemInstruction,
+        systemInstruction: {
+            role: "system",
+            parts: [{ text: systemInstruction }]
+        },
         generationConfig: { temperature: 0.2 },
     });
 
@@ -471,7 +512,27 @@ export async function callGeminiForChatStream(
     
     const lastMessage = messages[messages.length - 1].content;
     const chat = model.startChat({ history });
-    return chat.sendMessageStream(lastMessage);
+    const responseStream = await chat.sendMessageStream(lastMessage);
+
+    // Wrap the stream to add a text() helper to each chunk for compatibility with the routes
+    const wrappedStream = (async function* () {
+        for await (const chunk of responseStream.stream) {
+            yield {
+                ...chunk,
+                text: () => chunk.candidates?.[0]?.content?.parts?.[0]?.text || ""
+            };
+        }
+    })();
+
+    const wrappedResponse = responseStream.response.then(res => ({
+        ...res,
+        text: () => res.candidates?.[0]?.content?.parts?.[0]?.text || ""
+    }));
+
+    return {
+        stream: wrappedStream,
+        response: wrappedResponse
+    };
 }
 
 // ── Utility: smart truncation for large files ─────────────────────────────────
@@ -501,3 +562,86 @@ export function smartTruncate(content: string, issueTerms: string[], maxLines = 
 
     return [...lines.slice(0, 150), "\n... omitted ...\n", ...lines.slice(-50)].join("\n");
 }
+
+export interface RetrievalReviewResult {
+    needMoreContext: boolean;
+    confidence: number;
+    missing: string[];
+}
+
+export async function callGeminiForRetrievalReview(
+    userMessage: string,
+    snippets: CodeSnippet[],
+    currentFileId: string,
+): Promise<RetrievalReviewResult | null> {
+    const client = getClient();
+    if (!client) return null;
+
+    const model = client.getGenerativeModel({
+        model: "gemini-2.5-pro",
+        generationConfig: {
+            temperature: 0,
+            responseMimeType: "application/json",
+        },
+    });
+
+    const snippetSection = formatSnippetsForPrompt(snippets);
+
+    const prompt = `You are an AI system retrieval auditor. Your task is to evaluate if the retrieved code snippets provide sufficient context to answer the user's question, or if more information is needed.
+
+User Question:
+${userMessage}
+
+Current File in Focus:
+${currentFileId}
+
+Retrieved Code Snippets:
+═══════════════════════════════════════════════
+${snippetSection}
+═══════════════════════════════════════════════
+
+Evaluate:
+1. Retrieval confidence (a score between 0.0 and 1.0 representing how confident you are that the query can be accurately answered using the current snippets).
+2. Context completeness (are all necessary definitions, callers, callees, schemas, or tests present?).
+3. Missing information.
+
+You must NOT choose specific files. You may ONLY request information categories.
+Allowed categories:
+* "usages"
+* "callers"
+* "callees"
+* "implementations"
+* "imports"
+* "exports"
+* "schemas"
+* "tests"
+* "configuration"
+* "related modules"
+* "neighboring graph nodes"
+
+Respond in JSON format matching this schema:
+{
+  "needMoreContext": boolean,
+  "confidence": number, // 0.0 to 1.0
+  "missing": string[] // subset of the allowed categories list above
+}
+`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const res = await result.response;
+        const text = getText(res);
+        logUsage("retrieval-review", res.usageMetadata, prompt, text);
+
+        const parsed = JSON.parse(text);
+        return {
+            needMoreContext: Boolean(parsed.needMoreContext),
+            confidence: Number(parsed.confidence) ?? 0.5,
+            missing: (parsed.missing ?? []).filter((m: unknown): m is string => typeof m === "string"),
+        };
+    } catch (err) {
+        console.error("\x1b[31m[issueAnalyzer] Retrieval review failed:\x1b[0m", err);
+        return null;
+    }
+}
+

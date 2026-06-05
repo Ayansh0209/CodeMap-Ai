@@ -87,7 +87,7 @@ export const MIN_CANDIDATES_FOR_STAGE1 = 5;
  * - auto-docs/auto-schema: generated documentation
  * - Test files: only enter via PR source, never via token match
  */
-function isNoisePath(fileId: string): boolean {
+export function isNoisePath(fileId: string): boolean {
     const lower = fileId.toLowerCase();
 
     // TypeScript declaration files — zero behavior

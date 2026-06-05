@@ -27,7 +27,7 @@
 
 import { extractSearchIntent } from "./issueUnderstanding";
 import type { SearchIntent } from "./issueUnderstanding";
-import { traverseGraph, buildCompactGraphMap } from "./issueMapper";
+import { traverseGraph, buildCompactGraphMap, MIN_CANDIDATES_FOR_STAGE1 } from "./issueMapper";
 import type { CandidateSet, CandidateFileEntry } from "./issueMapper";
 import { fetchSnippets } from "./snippetFetcher";
 import type { CodeSnippet } from "./snippetFetcher";
@@ -87,7 +87,7 @@ export interface PipelineResult {
 
 // ── RetrievalIndex loader ─────────────────────────────────────────────────────
 
-async function loadRetrievalIndex(owner: string, repo: string): Promise<RetrievalIndex | null> {
+export async function loadRetrievalIndex(owner: string, repo: string): Promise<RetrievalIndex | null> {
     try {
         const key = `retrieval:${owner}:${repo}`;
         const raw = await redisConnection.get(key);
@@ -271,34 +271,11 @@ export async function runIssueMappingPipeline(
         };
     }
 
-    // Run Stage 1 and Stage 2 in parallel
+    // Stage 1: always run (pure in-memory, <10ms)
     let stage1Candidates: CandidateSet;
-    let stage2RequestedFiles: string[] = [];
-
     try {
-        const stage1Promise = Promise.resolve().then(() =>
-            traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds)
-        );
-        const stage2Promise = (async () => {
-            try {
-                const graphMap = buildCompactGraphMap(retrieval);
-                console.log(`\x1b[36m[issuePipeline] STAGE 2 — graph map: ${graphMap.split("\n").length} files, ${graphMap.length} chars\x1b[0m`);
-                return await callGeminiForGraphNavigation(input.issue, graphMap);
-            } catch (err) {
-                console.warn("\x1b[31m[issuePipeline] STAGE 2 failed:\x1b[0m", (err as Error).message);
-                return [];
-            }
-        })();
-
-        const [s1, s2] = await Promise.all([stage1Promise, stage2Promise]);
-        stage1Candidates = s1;
-        stage2RequestedFiles = s2;
-
-        console.log(
-            `\x1b[34m[issuePipeline] STAGE 1 — graph traversal found ${stage1Candidates.files.length} candidates ` +
-            `(${stage1Candidates.files.filter(f => f.source === "pr").length} from PRs)\x1b[0m`
-        );
-        console.log(`\x1b[34m[issuePipeline] STAGE 2 — Gemini returned ${stage2RequestedFiles.length} files\x1b[0m`);
+        stage1Candidates = traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds);
+        console.log(`\x1b[34m[issuePipeline] STAGE 1 — found ${stage1Candidates.files.length} candidates\x1b[0m`);
     } catch (err) {
         console.warn("\x1b[31m[issuePipeline] STAGE 1 graph traversal failed:\x1b[0m", (err as Error).message);
         // Fall back to legacy
@@ -311,6 +288,25 @@ export async function runIssueMappingPipeline(
             intent,
             fallbackFiles,
         };
+    }
+
+    // Stage 2: only when Stage 1 is insufficient OR issue is vague
+    const needsStage2 =
+        stage1Candidates.files.length < MIN_CANDIDATES_FOR_STAGE1 ||
+        intent.isVague;
+
+    let stage2RequestedFiles: string[] = [];
+    if (needsStage2) {
+        console.log(`\x1b[33m[issuePipeline] STAGE 2 triggered — candidates=${stage1Candidates.files.length}, isVague=${intent.isVague}\x1b[0m`);
+        try {
+            const graphMap = buildCompactGraphMap(retrieval);
+            stage2RequestedFiles = await callGeminiForGraphNavigation(input.issue, graphMap);
+            console.log(`\x1b[34m[issuePipeline] STAGE 2 — Gemini returned ${stage2RequestedFiles.length} files\x1b[0m`);
+        } catch (err) {
+            console.warn("\x1b[31m[issuePipeline] STAGE 2 failed:\x1b[0m", (err as Error).message);
+        }
+    } else {
+        console.log(`\x1b[32m[issuePipeline] STAGE 1 sufficient and specific — skipping Stage 2\x1b[0m`);
     }
 
     // Merge and deduplicate candidates based on source priority: pr > keyword > barrel-expansion > neighborhood > gemini-directed

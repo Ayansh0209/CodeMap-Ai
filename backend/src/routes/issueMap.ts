@@ -34,12 +34,13 @@ import {
     fetchLinkedPRs,
     fetchRawFile,
 } from "../github/issueClient";
-import { smartTruncate, callGeminiForChatStream } from "../parser/issueAnalyzer";
-import type { AffectedFile } from "../parser/issueAnalyzer";
 import {
     runIssueMappingPipeline,
     type PipelineInput,
 } from "../parser/issuePipeline";
+import { smartTruncate, callGeminiForChatStream, type AffectedFile } from "../parser/issueAnalyzer";
+import { buildChatContext } from "../parser/chatContextBuilder";
+import { rateLimiter, getClientIdentifier, getDateString } from "../middleware/rateLimiter";
 
 const router = Router();
 
@@ -79,18 +80,6 @@ const SuggestFixRequestSchema = z.object({
     connectedFileIds: z.array(z.string()).max(10).optional().default([]),
 });
 
-const ChatRequestSchema = z.object({
-    owner:            z.string().min(1).max(100),
-    repo:             z.string().min(1).max(100),
-    commitSha:        z.string().min(1).max(200),
-    issueNumber:      z.number().int().positive().optional(),
-    fileId:           z.string().min(1).max(500),
-    connectedFileIds: z.array(z.string()).max(10).optional().default([]),
-    messages:         z.array(z.object({
-        role: z.enum(["user", "model", "assistant"]),
-        content: z.string().min(1)
-    })).min(1).max(20),
-});
 
 // ── Response types ────────────────────────────────────────────────────────────
 // These shapes are consumed by the frontend — do not change field names or remove fields.
@@ -362,128 +351,171 @@ router.post("/suggest-fix", async (req: Request, res: Response) => {
 });
 
 // ── POST /issue-map/chat ──────────────────────────────────────────────────────
-// Unchanged — this route has its own separate context pipeline that fetches
-// raw file content and builds a system prompt for an interactive chat session.
-// It does NOT use the issue mapping pipeline.
+const MAX_CHAT_HISTORY_CHARS = 12000;
 
-router.post("/chat", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const {
-            owner, repo, commitSha, issueNumber, fileId,
-            connectedFileIds, messages,
-        } = ChatRequestSchema.parse(req.body);
+function filterMessagesByBudget(
+  messages: Array<{ role: "user" | "model" | "assistant"; content: string }>
+): Array<{ role: "user" | "model" | "assistant"; content: string }> {
+  const result: Array<{ role: "user" | "model" | "assistant"; content: string }> = [];
+  let accumulatedChars = 0;
 
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Connection", "keep-alive");
-
-        const cacheKey = `issue-chat-ctx:${owner}:${repo}:${issueNumber ?? "no-issue"}:${fileId}:${commitSha}`;
-
-        let systemContext: string | null = null;
-        try {
-            systemContext = await redisConnection.get(cacheKey);
-        } catch {
-            // Redis down — build context fresh
-        }
-
-        if (!systemContext) {
-            let issueData: any = null;
-            let prData: any[]  = [];
-            let primaryFileContent = "";
-
-            if (issueNumber) {
-                const [fetchedIssue, comments, linkedPRs, content] = await Promise.all([
-                    fetchIssue(owner, repo, issueNumber),
-                    fetchIssueComments(owner, repo, issueNumber, 5),
-                    fetchLinkedPRs(owner, repo, issueNumber),
-                    fetchRawFile(owner, repo, commitSha, fileId),
-                ]);
-                issueData          = fetchedIssue;
-                prData             = linkedPRs;
-                primaryFileContent = content;
-            } else {
-                primaryFileContent = await fetchRawFile(owner, repo, commitSha, fileId);
-            }
-
-            const connectedContents = await Promise.all(
-                connectedFileIds.map((id: string) =>
-                    fetchRawFile(owner, repo, commitSha, id)
-                        .then((content: string) => ({ id, content }))
-                )
-            );
-
-            const issueTerms = issueData
-                ? [...new Set(
-                    (issueData.title + " " + issueData.body)
-                        .match(/\b([a-z][a-zA-Z0-9_]{2,}|[A-Z][a-zA-Z0-9_]{2,})\b/g) ?? []
-                  )]
-                : [];
-
-            const primaryTruncated = smartTruncate(primaryFileContent, issueTerms, 300);
-            const connectedParts   = connectedContents
-                .filter((c: any) => c.content)
-                .map((c: any) => `-- ${c.id} --\n${smartTruncate(c.content, issueTerms, 80)}`)
-                .join("\n\n");
-
-            const prLines = prData.map((pr: any) =>
-                `  PR #${pr.number} [${pr.merged ? "MERGED" : pr.state.toUpperCase()}]: ${pr.title}\n` +
-                `  Changed files: ${pr.changedFiles.slice(0, 10).join(", ")}`
-            ).join("\n");
-
-            const instructions = [
-                "You are a senior software engineer assistant. Your behavior depends on what the user is asking in their latest message.",
-                "If the user is asking to fix, solve, implement, or change something — respond with actual code changes: show the file path, the function or block to change, and the replacement code. Do not explain what needs to be done without showing the code.",
-                "If the user is asking to explain, understand, or describe something — give a clear explanation without unnecessary code.",
-                "Always ground your response in the actual file contents provided below."
-            ].join("\n");
-
-            systemContext = [
-                instructions,
-                "",
-                `REPOSITORY: ${owner}/${repo}`,
-                issueData
-                    ? `ISSUE #${issueNumber}: ${issueData.title}`
-                    : "NO SPECIFIC ISSUE SELECTED",
-                "",
-                "ISSUE DESCRIPTION:",
-                issueData ? issueData.body.slice(0, 600) : "N/A",
-                "",
-                "LINKED PULL REQUESTS:",
-                prLines || "None",
-                "",
-                `PRIMARY FILE: ${fileId}`,
-                primaryTruncated,
-                "",
-                connectedParts ? `CONNECTED FILES:\n${connectedParts}` : "",
-            ].join("\n");
-
-            try {
-                await redisConnection.set(cacheKey, systemContext);
-            } catch {
-                // Redis down — context will be rebuilt on next request
-            }
-        }
-
-        const result = await callGeminiForChatStream(systemContext, messages);
-
-        for await (const chunk of result.stream) {
-            const text = chunk.text();
-            res.write(`data: ${JSON.stringify(text)}\n\n`);
-        }
-
-        res.write("data: [DONE]\n\n");
-        res.end();
-    } catch (err) {
-        if (err instanceof z.ZodError) {
-            res.write(`data: ${JSON.stringify("[Error] Invalid request: " + err.message)}\n\n`);
-            res.write("data: [DONE]\n\n");
-            return res.end();
-        }
-        console.error("[issueMap chat] Error:", err);
-        res.write(`data: ${JSON.stringify("[Error] Failed to process chat request.")}\n\n`);
-        res.write("data: [DONE]\n\n");
-        res.end();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    // Always include the latest message so we don't end up with an empty history
+    if (i === messages.length - 1) {
+      result.unshift(msg);
+      accumulatedChars += msg.content.length;
+      continue;
     }
+    if (accumulatedChars + msg.content.length > MAX_CHAT_HISTORY_CHARS) {
+      break;
+    }
+    result.unshift(msg);
+    accumulatedChars += msg.content.length;
+  }
+
+  return result;
+}
+
+const ChatRequestSchema = z.object({
+    owner:         z.string().min(1).max(100),
+    repo:          z.string().min(1).max(100),
+    commitSha:     z.string().min(1).max(200),
+    issueNumber:   z.number().int().positive().optional(),
+    currentFileId: z.string().min(1).max(500),
+    messages:      z.array(
+        z.object({
+            role: z.enum(["user", "model", "assistant"]),
+            content: z.string().min(1)
+        })
+    ).min(1)
+});
+
+router.post("/chat", rateLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const parsed = ChatRequestSchema.parse(req.body);
+    const { owner, repo, commitSha, currentFileId, issueNumber, messages } = parsed;
+
+    const lastMessage = messages[messages.length - 1];
+    const lastMessageContent = lastMessage?.content || "";
+
+    // Resolve graphFileIds from Redis
+    const graphFileIds = new Set<string>();
+    try {
+      const cachedGraph = await redisConnection.get(`graph:${owner}:${repo}`);
+      if (cachedGraph) {
+        const parsedGraph = JSON.parse(cachedGraph);
+        if (parsedGraph && Array.isArray(parsedGraph.files)) {
+          for (const file of parsedGraph.files) {
+            if (file && typeof file.id === "string") {
+              graphFileIds.add(file.id);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[chatRoute] Failed to fetch graph files from Redis:", err);
+    }
+
+    const retrievalStartTime = Date.now();
+    const context = await buildChatContext({
+      currentFileId,
+      userMessage: lastMessageContent,
+      owner,
+      repo,
+      commitSha,
+      graphFileIds,
+      issueNumber
+    });
+    const retrievalTimeMs = Date.now() - retrievalStartTime;
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    const budgetedMessages = filterMessagesByBudget(messages);
+
+    const geminiStartTime = Date.now();
+    const result = await callGeminiForChatStream(context.systemInstruction, budgetedMessages);
+
+    let completionText = "";
+    for await (const chunk of result.stream) {
+      const text = chunk.text();
+      completionText += text;
+      res.write(`data: ${JSON.stringify(text)}\n\n`);
+    }
+
+    res.write("data: [DONE]\n\n");
+    res.end();
+
+    const geminiExecutionTimeMs = Date.now() - geminiStartTime;
+
+    // Track tokens & telemetry asynchronously
+    (async () => {
+      let promptTokens = 0;
+      let completionTokens = 0;
+      try {
+        const finalResponse = await result.response;
+        const usage = finalResponse.usageMetadata;
+        if (usage) {
+          promptTokens = usage.promptTokenCount ?? 0;
+          completionTokens = usage.candidatesTokenCount ?? 0;
+        }
+      } catch (err) {
+        // Usage metadata not available yet
+      }
+
+      if (!promptTokens) {
+        const totalPromptChars = context.systemInstruction.length + budgetedMessages.map(m => m.content).join(" ").length;
+        promptTokens = Math.ceil(totalPromptChars / 4);
+      }
+      if (!completionTokens) {
+        completionTokens = Math.ceil(completionText.length / 4);
+      }
+
+      const totalTokens = promptTokens + completionTokens;
+      const clientIdentifier = (req as any).clientIdentifier || getClientIdentifier(req);
+      const dateStr = getDateString();
+      const tokKey = `rate-limit:tok:${clientIdentifier}:${dateStr}`;
+
+      try {
+        await redisConnection.incrby(tokKey, totalTokens);
+        await redisConnection.expire(tokKey, 86400);
+      } catch (err) {
+        console.warn("[chatRoute] Failed to increment token usage in Redis:", err);
+      }
+
+      // Cost Telemetry
+      const metrics = {
+        timestamp: new Date().toISOString(),
+        identifier: clientIdentifier,
+        promptTokens,
+        completionTokens,
+        retrievalCandidates: context.candidateCount,
+        snippetCount: context.snippets.length,
+        retrievalTimeMs,
+        geminiExecutionTimeMs,
+      };
+
+      try {
+        await redisConnection.lpush("telemetry:chat", JSON.stringify(metrics));
+        await redisConnection.ltrim("telemetry:chat", 0, 999);
+      } catch (err) {
+        console.warn("[chatRoute] Failed to write telemetry metrics to Redis:", err);
+      }
+    })().catch(err => console.error("[chatRoute] Error processing async telemetry:", err));
+
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.write(`data: ${JSON.stringify("[Error] Invalid request: " + err.message)}\n\n`);
+      res.write("data: [DONE]\n\n");
+      return res.end();
+    }
+    console.error("[chatRoute] Error handling request:", err);
+    res.write(`data: ${JSON.stringify("[Error] Internal server error.")}\n\n`);
+    res.write("data: [DONE]\n\n");
+    res.end();
+  }
 });
 
 export default router;

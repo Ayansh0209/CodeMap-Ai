@@ -642,6 +642,7 @@ export default function DetailsPanel({
               commitSha={commitSha}
               issueNumber={issueResult?.issueNumber}
               fileId={file.id}
+              currentFileId={file.id}
               messages={chatMessages}
               setMessages={setChatMessages}
               isLoading={!!isChatLoading}

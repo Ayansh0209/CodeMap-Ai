@@ -505,7 +505,6 @@ function RepoPageContent() {
 
   // ── Open Chat ───────────────────────────────────────────────────────────────
   const handleOpenChat = useCallback((fileId: string) => {
-    // Switch to AI tab in the details panel
     setSidebarTab("ai");
   }, []);
 

@@ -44,4 +44,13 @@ export const config = {
     gemini: {
         apiKey: optional("GEMINI_API_KEY"),
     },
+
+    chat: {
+        enableIterativeRetrieval: process.env.ENABLE_ITERATIVE_CHAT_RETRIEVAL === "true",
+    },
+
+    gcp: {
+        projectId: optional("GCP_PROJECT_ID"),
+        location: optional("GCP_LOCATION"),
+    },
 };
