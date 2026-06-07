@@ -232,3 +232,26 @@ export interface IssueContext {
   confidence: number;
   reason: string;
 }
+
+// ── Architecture Map types ───────────────────────────────────────────────────
+
+export interface RepoModuleDTO {
+  id: string;
+  name: string;
+  description: string;
+  importance: number;
+  files: string[];
+  representativeFiles?: string[];
+}
+
+export interface ModuleDependencyDTO {
+  source: string;
+  target: string;
+  count: number;
+}
+
+export interface ArchitectureMapResponse {
+  modules: RepoModuleDTO[];
+  dependencies: ModuleDependencyDTO[];
+}
+

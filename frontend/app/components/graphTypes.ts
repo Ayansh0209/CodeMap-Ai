@@ -18,10 +18,10 @@ export interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   data: ImportEdgeDTO;
 }
 
-export function getRadius(n: SimNode): number {
+export function getRadius(n: SimNode, representativeFilesSet?: Set<string>): number {
   if (n.data.kind === "config") return 12;
   if (n.data.kind === "test") return 13;
-  if (n.data.isEntryPoint) return 24;
+  if (representativeFilesSet?.has(n.id)) return 24;
   if (n.data.isDeadCode) return 14;
   return 18;
 }

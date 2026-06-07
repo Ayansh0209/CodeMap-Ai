@@ -13,7 +13,7 @@ const KINDS = [
   { id: "source", label: "Source" },
   { id: "test", label: "Tests" },
   { id: "config", label: "Config" },
-  { id: "entry", label: "Entry Points" },
+  { id: "entry", label: "Core Files" },
   { id: "ui", label: "UI" },
 ];
 

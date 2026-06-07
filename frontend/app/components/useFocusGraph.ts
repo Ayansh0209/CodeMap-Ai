@@ -18,7 +18,8 @@ export function useFocusGraph({
   onFileClickRef,
   setFocusedNodeId,
   setFocusDepth,
-  setExpandedFolders
+  setExpandedFolders,
+  representativeFilesSet
 }: {
   focusedNodeId: string | null;
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -34,6 +35,7 @@ export function useFocusGraph({
   setFocusedNodeId: (id: string | null) => void;
   setFocusDepth: (depth: 1 | 2 | "all") => void;
   setExpandedFolders: React.Dispatch<React.SetStateAction<Set<string>>>;
+  representativeFilesSet: Set<string>;
 }) {
   useEffect(() => {
     if (!focusedNodeId || !containerRef.current) return;
@@ -54,7 +56,7 @@ export function useFocusGraph({
       inDegrees.set(e.target, (inDegrees.get(e.target) || 0) + 1);
       outDegrees.set(e.source, (outDegrees.get(e.source) || 0) + 1);
     }
-    const getImportance = (f: FileNodeDTO) => (inDegrees.get(f.id) || 0) * 1.2 + (outDegrees.get(f.id) || 0) * 1.0 + (f.isEntryPoint ? 5 : 0);
+    const getImportance = (f: FileNodeDTO) => (inDegrees.get(f.id) || 0) * 1.2 + (outDegrees.get(f.id) || 0) * 1.0 + (representativeFilesSet.has(f.id) ? 5 : 0);
 
     const hopMap = new Map<string, number>();
     hopMap.set(focusedNodeId, 0);
@@ -229,6 +231,7 @@ export function useFocusGraph({
 
       let r = 7;
       if (isFocused) r = 18;
+      else if (representativeFilesSet.has(d.id)) r = 14;
       else if (d.isGroup) r = 10;
       else if (d.importance > 12) r = 9;
       if (d.hop && d.hop > 1) r *= 0.85;
@@ -239,7 +242,7 @@ export function useFocusGraph({
       }
 
       const circle = g2.append("circle").attr("r", r)
-        .attr("fill", isFocused ? "#f0883e" : (d.isGroup ? "#30363d" : getLanguageColor(d.data.language)))
+        .attr("fill", isFocused ? "#f0883e" : (d.isGroup ? "#30363d" : (representativeFilesSet.has(d.id) ? "#22c55e" : getLanguageColor(d.data.language))))
         .attr("stroke", isFocused ? "#f0883e" : "#0d1117").attr("stroke-width", 1.5)
         .attr("opacity", isSearchMatch ? hopOpacity : 0.12);
 

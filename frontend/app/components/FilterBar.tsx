@@ -11,7 +11,7 @@ const KINDS = [
   { id: "source", label: "Source" },
   { id: "test", label: "Tests" },
   { id: "config", label: "Config" },
-  { id: "entry", label: "Entry Points" }, // Maps to isEntryPoint
+  { id: "entry", label: "Core Files" }, // Maps to representativeFilesSet
   { id: "ui", label: "UI" }, // Simplistic proxy: tsx/jsx
 ];
 

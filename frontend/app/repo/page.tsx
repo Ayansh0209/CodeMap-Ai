@@ -19,6 +19,7 @@ import type {
   ViewMode,
   IssueMapResult,
   StatusResponse,
+  RepoModuleDTO,
 } from "../lib/types";
 
 function RepoPageContent() {
@@ -107,10 +108,21 @@ function RepoPageContent() {
 
   // ── Sidebar Tab State ───────────────────────────────────────────────────────
   const [sidebarTab, setSidebarTab] = useState<"info" | "code" | "ai">("info");
+  const [modules, setModules] = useState<RepoModuleDTO[]>([]);
 
   // ── Filter state ────────────────────────────────────────────────────────────
   const [activeKinds, setActiveKinds] = useState<Set<string>>(new Set());
   const [activeLanguages, setActiveLanguages] = useState<Set<string>>(new Set());
+
+  const representativeFilesSet = useMemo(() => {
+    const set = new Set<string>();
+    modules.forEach(m => {
+      if (m.representativeFiles) {
+        m.representativeFiles.forEach(f => set.add(f));
+      }
+    });
+    return set;
+  }, [modules]);
 
   const filteredNodeIds = useMemo(() => {
     if (!fileGraph) return undefined;
@@ -120,7 +132,7 @@ function RepoPageContent() {
     for (const f of fileGraph.files) {
       let kindMatch = activeKinds.size === 0;
       if (activeKinds.size > 0) {
-        if (activeKinds.has("entry") && f.isEntryPoint) kindMatch = true;
+        if (activeKinds.has("entry") && representativeFilesSet.has(f.id)) kindMatch = true;
         else if (activeKinds.has("source") && f.kind === "source") kindMatch = true;
         else if (activeKinds.has("test") && f.kind === "test") kindMatch = true;
         else if (activeKinds.has("config") && f.kind === "config") kindMatch = true;
@@ -135,7 +147,7 @@ function RepoPageContent() {
       if (kindMatch && langMatch) filtered.add(f.id);
     }
     return filtered;
-  }, [fileGraph, activeKinds, activeLanguages]);
+  }, [fileGraph, activeKinds, activeLanguages, representativeFilesSet]);
 
   // ── Issue mapping state ─────────────────────────────────────────────────────
   const [issueResult, setIssueResult] = useState<IssueMapResult | null>(null);
@@ -572,6 +584,8 @@ function RepoPageContent() {
           onFileSelect={handleFileClick}
           onZoomToNode={handleZoomToNode}
           allFunctions={allFunctions}
+          modules={modules}
+          setModules={setModules}
         />
 
         {/* ── Center: Graph Canvas ───────────────────────────────────── */}
@@ -614,6 +628,7 @@ function RepoPageContent() {
                 focusMode={focusMode}
                 zoomToNodeRef={zoomToNodeRef}
                 filteredNodeIds={filteredNodeIds}
+                modules={modules}
               />
             </div>
             

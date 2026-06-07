@@ -26,7 +26,7 @@ export default function StatsBar({ stats, owner, repo }: StatsBarProps) {
         <StatCard label="Import Edges" value={stats.totalImportEdges} icon="→" />
         <StatCard label="Call Edges" value={stats.totalCallEdges} icon="⇆" />
         <StatCard label="Test Files" value={stats.testFiles} icon="🧪" />
-        <StatCard label="Entry Points" value={stats.entryPoints} icon="⚡" />
+        <StatCard label="Core Files" value={stats.entryPoints} icon="⚡" />
         {stats.deadCodeFiles > 0 && (
           <StatCard label="Dead Code" value={stats.deadCodeFiles} icon="💀" />
         )}

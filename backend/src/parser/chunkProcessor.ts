@@ -78,18 +78,6 @@ function detectFileKind(relativePath: string, sourceFile?: any): FileKind {
     return "source";
 }
 
-function detectIsEntryPoint(relativePath: string): boolean {
-    const filename = path.basename(relativePath).toLowerCase();
-    const ENTRY_NAMES = new Set([
-        "index.ts", "index.js", "index.tsx", "index.jsx",
-        "main.ts", "main.js",
-        "server.ts", "server.js",
-        "app.ts", "app.js",
-        "entry.ts", "entry.js",
-    ]);
-    return ENTRY_NAMES.has(filename);
-}
-
 function countLines(absolutePath: string): number {
     try {
         const content = fs.readFileSync(absolutePath, "utf-8");
@@ -275,7 +263,7 @@ async function processChunk(
                 lineCount: countLines(decision.absolutePath),
                 parseStatus: "skipped",
                 kind: detectFileKind(decision.relativePath),
-                isEntryPoint: detectIsEntryPoint(decision.relativePath),
+                isEntryPoint: false,
                 functions: [],
                 externalImports: [],
                 unresolvedImports: [],
@@ -349,7 +337,7 @@ export async function processAllFiles(
             lineCount: countLines(decision.absolutePath),
             parseStatus: "skipped",
             kind: detectFileKind(decision.relativePath),
-            isEntryPoint: detectIsEntryPoint(decision.relativePath),
+            isEntryPoint: false,
             functions: [],
             externalImports: [],
             unresolvedImports: [],

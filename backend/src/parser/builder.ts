@@ -14,7 +14,6 @@ import {
     FileGraphPayload,
     FunctionFilePayload,
 } from "../models/schema";
-import { applyEntryScoring } from "./entryScorer";
 import { applyGraphAnalytics } from "./graphAnalytics";
 import { detectWorkspaces, resolveFilePackage } from "./workspaceResolver";
 import { analyzeDeadCode } from "./deadCodeAnalyzer";
@@ -98,14 +97,7 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
         console.log(`[builder] dropped ${orphanCount} orphan import edges (target file not in graph)`);
     }
 
-    // ── Step 2.5: Apply entry point scoring ──────────────────────────────────
-    // Run AFTER dedup and validation so inDegree/outDegree counts are based on
-    // real edges only. entryScorer mutates fileNodes in place.
-    applyEntryScoring(fileNodes, validImportEdges, {
-        repoRoot:       repoRoot ?? "",
-        startupSignals: startupSignals ?? new Map(),
-        routeHandlers:  routeHandlers  ?? new Map(),
-    });
+
 
     // ── Step 2.6: Mark Test Coverage Edges ───────────────────────────────────
     for (const edge of validImportEdges) {
@@ -142,7 +134,7 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
         let hubScore = ((inD * 2 + outD) / totalFiles) * 100;
         hubScore = Math.round(hubScore * 100) / 100;
 
-        const entry = file.isEntryPoint ? 30 : 0;
+        const entry = 0;
         const cycle = cycleScore * 5;
         let architecturalImportance = hubScore + entry + cycle;
         if (architecturalImportance > 100) architecturalImportance = 100;

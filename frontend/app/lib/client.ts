@@ -24,9 +24,12 @@ export type {
   IssueMapRequest,
   AffectedFile,
   AffectedFunction,
+  RepoModuleDTO,
+  ModuleDependencyDTO,
+  ArchitectureMapResponse,
 } from "./types";
 
-import type { AnalyzeResponse, StatusResponse, SearchResponse, IssueMappingResult, IssueMapRequest, IssueMapResult, FunctionFilePayload } from "./types";
+import type { AnalyzeResponse, StatusResponse, SearchResponse, IssueMappingResult, IssueMapRequest, IssueMapResult, FunctionFilePayload, ArchitectureMapResponse } from "./types";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
@@ -172,6 +175,23 @@ export async function fetchFileFunctions(
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchArchitectureMap(
+  owner: string,
+  repo: string,
+  commitSha: string
+): Promise<ArchitectureMapResponse> {
+  const res = await fetch(`${API_BASE}/architecture`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, commitSha }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to fetch architecture map" }));
+    throw new Error(err.error || `HTTP ${res.status}`);
   }
   return res.json();
 }

@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useEffect, useMemo } from "react";
-import type { FileNodeDTO, ImportEdgeDTO, IssueMapResult, AffectedFile } from "../lib/types";
+import { useRef, useEffect, useMemo, useState } from "react";
+import type { FileNodeDTO, ImportEdgeDTO, IssueMapResult, AffectedFile, RepoModuleDTO } from "../lib/types";
 import IssueMapper from "./IssueMapper";
+import { fetchArchitectureMap } from "../lib/client";
 
 interface SidebarProps {
   // Sizing
@@ -28,6 +29,9 @@ interface SidebarProps {
   onFileSelect: (file: FileNodeDTO) => void;
   onZoomToNode: (fileId: string) => void;
   allFunctions: Array<{ id: string; name: string; filePath: string }>;
+  // Lifted Architecture Map state
+  modules: RepoModuleDTO[];
+  setModules: React.Dispatch<React.SetStateAction<RepoModuleDTO[]>>;
 }
 
 export default function Sidebar({
@@ -50,10 +54,50 @@ export default function Sidebar({
   onFileSelect,
   onZoomToNode,
   allFunctions,
+  modules,
+  setModules,
 }: SidebarProps) {
   const isDragging = useRef(false);
   const startX = useRef(0);
   const startW = useRef(280);
+
+  // ── Architecture Map State ──────────────────────────────────────────────────
+  const [isArchitectureLoading, setIsArchitectureLoading] = useState(false);
+  const [architectureError, setArchitectureError] = useState<string | null>(null);
+  const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
+  const [advancedInsightsExpanded, setAdvancedInsightsExpanded] = useState(false);
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!owner || !repo || !commitSha) return;
+
+    setIsArchitectureLoading(true);
+    setArchitectureError(null);
+    fetchArchitectureMap(owner, repo, commitSha)
+      .then((data) => {
+        const sorted = [...(data.modules || [])].sort((a, b) => b.importance - a.importance);
+        setModules(sorted);
+        setVisibleCounts({});
+        // Auto-expand the first module (highest importance)
+        if (sorted.length > 0) {
+          setExpandedModules({ [sorted[0].id]: true });
+        }
+      })
+      .catch((err) => {
+        console.error("[Sidebar] Failed to load Repository Map:", err);
+        setArchitectureError("Failed to load Repository Map");
+      })
+      .finally(() => {
+        setIsArchitectureLoading(false);
+      });
+  }, [owner, repo, commitSha]);
+
+  const toggleModule = (moduleId: string) => {
+    setExpandedModules((prev) => ({
+      ...prev,
+      [moduleId]: !prev[moduleId],
+    }));
+  };
 
   // ── Drag resize ───────────────────────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -90,10 +134,6 @@ export default function Sidebar({
   }, [width]);
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  const entryPoints = useMemo(
-    () => files.filter(f => f.isEntryPoint).slice(0, 10),
-    [files]
-  );
 
   const mostConnected = useMemo(() => {
     const degreeMap = new Map<string, number>();
@@ -295,52 +335,184 @@ export default function Sidebar({
                 </ul>
               </div>
 
-              {/* ── Entry Points ──────────────────────────────────────────── */}
-              {entryPoints.length > 0 && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 px-1" style={{ color: "#8b949e" }}>
-                    ⚡ Entry Points ({entryPoints.length})
-                  </div>
-                  <div className="space-y-0.5">
-                    {entryPoints.map(f => (
-                      <button
-                        key={f.id}
-                        onClick={() => { onFileSelect(f); onZoomToNode(f.id); }}
-                        className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] truncate transition-colors"
-                        style={{ color: "#3fb950", fontFamily: "var(--font-geist-mono), monospace" }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#161b22"; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
-                      >
-                        {f.label}
-                      </button>
-                    ))}
-                  </div>
+              {/* ── Repository Map ───────────────────────────────────────── */}
+              <div className="space-y-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wider mb-1 px-1" style={{ color: "#8b949e" }}>
+                  🗺️ Repository Map
                 </div>
-              )}
 
-              {/* ── Most Connected ────────────────────────────────────────── */}
-              {mostConnected.length > 0 && (
-                <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 px-1" style={{ color: "#8b949e" }}>
-                    🔗 Most Connected
+                {isArchitectureLoading && (
+                  <div className="text-xs px-2 py-3" style={{ color: "#8b949e" }}>
+                    <span className="inline-block w-3 h-3 border-2 rounded-full animate-spin mr-2" style={{ borderColor: "#58a6ff", borderTopColor: "transparent" }} />
+                    Discovering architecture...
                   </div>
-                  <div className="space-y-0.5">
-                    {mostConnected.map(({ file, degree }) => (
+                )}
+
+                {architectureError && (
+                  <div className="text-xs px-2 py-3" style={{ color: "#f85149" }}>
+                    ⚠️ {architectureError}
+                  </div>
+                )}
+
+                {!isArchitectureLoading && !architectureError && modules.length === 0 && (
+                  <div className="text-xs px-2 py-3" style={{ color: "#8b949e" }}>
+                    No architectural modules discovered.
+                  </div>
+                )}
+
+                {!isArchitectureLoading && !architectureError && modules.map((m) => {
+                  const isExpanded = !!expandedModules[m.id];
+                  return (
+                    <div key={m.id} className="rounded-xl overflow-hidden" style={{ border: "1px solid #21262d", background: "#161b22" }}>
+                      {/* Module Header Button */}
                       <button
-                        key={file.id}
-                        onClick={() => { onFileSelect(file); onZoomToNode(file.id); }}
-                        className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] truncate transition-colors flex items-center gap-2"
-                        style={{ color: "#e6edf3", fontFamily: "var(--font-geist-mono), monospace" }}
-                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#161b22"; }}
-                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                        onClick={() => toggleModule(m.id)}
+                        className="w-full text-left p-2.5 transition-colors flex items-start gap-2 hover:bg-[#21262d]"
+                        style={{ background: "transparent" }}
                       >
-                        <span className="truncate flex-1">{file.label}</span>
-                        <span className="text-[9px] shrink-0" style={{ color: "#484f58" }}>{degree} edges</span>
+                        {/* Chevron */}
+                        <span
+                          className="text-[#8b949e] mt-0.5 transition-transform duration-200"
+                          style={{ display: "inline-block", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                            <path d="M9 5l7 7-7 7" />
+                          </svg>
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-semibold truncate" style={{ color: "#e6edf3" }}>
+                              {m.name}
+                            </span>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#21262d", color: "#8b949e" }}>
+                              {m.files.length}
+                            </span>
+                          </div>
+                          {m.description && (
+                            <p className="text-[10px] mt-0.5 font-normal line-clamp-2 leading-relaxed" style={{ color: "#8b949e" }}>
+                              {m.description}
+                            </p>
+                          )}
+                        </div>
                       </button>
-                    ))}
+
+                      {/* Nested Files List */}
+                      {isExpanded && (
+                        <div className="border-t px-2 py-1.5 space-y-0.5" style={{ borderColor: "#21262d", background: "#0d1117" }}>
+                          {(() => {
+                            const repFiles = m.representativeFiles || [];
+                            const repList = m.files.filter((f) => repFiles.includes(f));
+                            const otherList = m.files.filter((f) => !repFiles.includes(f));
+                            const sortedFiles = [...repList, ...otherList];
+                            
+                            const defaultPageSize = 30;
+                            const limit = visibleCounts[m.id] || defaultPageSize;
+                            const visibleFiles = sortedFiles.slice(0, limit);
+
+                            return (
+                              <>
+                                {visibleFiles.map((filePath) => {
+                                  const file = files.find((f) => f.id === filePath);
+                                  if (!file) return null;
+
+                                  const isRepresentative = repFiles.includes(filePath);
+
+                                  return (
+                                    <button
+                                      key={filePath}
+                                      onClick={() => {
+                                        onFileSelect(file);
+                                        onZoomToNode(file.id);
+                                      }}
+                                      className="w-full text-left px-2 py-1 rounded text-[11px] truncate transition-colors flex items-center justify-between hover:bg-[#161b22]"
+                                      style={{
+                                        color: isRepresentative ? "#e3b341" : "#e6edf3",
+                                        fontFamily: "var(--font-geist-mono), monospace"
+                                      }}
+                                      title={filePath}
+                                    >
+                                      <span className="truncate flex-1">{file.label}</span>
+                                      {isRepresentative && (
+                                        <span className="text-[8px] font-bold px-1 py-0.5 rounded uppercase shrink-0 ml-1.5" style={{ background: "rgba(227,179,65,0.15)", color: "#e3b341" }}>
+                                          ⭐ Core
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+
+                                {sortedFiles.length > limit && (
+                                  <button
+                                    onClick={() => setVisibleCounts(prev => ({
+                                      ...prev,
+                                      [m.id]: (prev[m.id] || defaultPageSize) + 100
+                                    }))}
+                                    className="w-full text-center py-1 mt-1 border border-dashed rounded text-[10px] hover:bg-[#161b22] transition-colors"
+                                    style={{ borderColor: "#30363d", color: "#8b949e" }}
+                                  >
+                                    Show more (+100 files, {sortedFiles.length - limit} remaining)
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* ── Advanced Insights Collapsible ───────────────────────── */}
+              <div className="rounded-xl overflow-hidden mt-4" style={{ border: "1px solid #21262d", background: "#161b22" }}>
+                <button
+                  onClick={() => setAdvancedInsightsExpanded(prev => !prev)}
+                  className="w-full text-left p-2.5 transition-colors flex items-center gap-2 hover:bg-[#21262d]"
+                  style={{ background: "transparent" }}
+                >
+                  <span
+                    className="text-[#8b949e] transition-transform duration-200"
+                    style={{ display: "inline-block", transform: advancedInsightsExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <path d="M9 5l7 7-7 7" />
+                    </svg>
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: "#e6edf3" }}>
+                    ⚙️ Advanced Insights
+                  </span>
+                </button>
+
+                {advancedInsightsExpanded && (
+                  <div className="p-2.5 border-t space-y-4" style={{ borderColor: "#21262d", background: "#0d1117" }}>
+
+
+                    {/* ── Most Connected ────────────────────────────────────────── */}
+                    {mostConnected.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider mb-1.5 px-1" style={{ color: "#8b949e" }}>
+                          🔗 Most Connected
+                        </div>
+                        <div className="space-y-0.5">
+                          {mostConnected.map(({ file, degree }) => (
+                            <button
+                              key={file.id}
+                              onClick={() => { onFileSelect(file); onZoomToNode(file.id); }}
+                              className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] truncate transition-colors flex items-center gap-2"
+                              style={{ color: "#e6edf3", fontFamily: "var(--font-geist-mono), monospace" }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#161b22"; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                            >
+                              <span className="truncate flex-1">{file.label}</span>
+                              <span className="text-[9px] shrink-0" style={{ color: "#484f58" }}>{degree} edges</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           )}
         </div>

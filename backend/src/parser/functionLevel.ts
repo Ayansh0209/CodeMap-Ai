@@ -25,6 +25,21 @@ function isExported(node: Node): boolean {
         node.getFirstAncestorByKind(SyntaxKind.ExportDeclaration) !== undefined;
 }
 
+// ── Test framework detection ─────────────────────────────────────────────────
+//
+// Covers all major JS/TS test frameworks:
+//   Jest, Vitest, Mocha, Jasmine, Ava, Tape, node:test, QUnit
+//
+// Pattern breakdown:
+//   [xf]?  — optional x (skip) or f (focused/only) prefix: xdescribe, fdescribe, fit, xit
+//   it|test|describe|suite|context|specify — core verbs across frameworks
+//   before/after + optional Each/All — lifecycle hooks
+//
+// This is intentionally NOT a hardcoded list of framework-specific functions.
+// Any framework that uses these naming conventions is automatically supported.
+
+const TEST_CALL_PATTERN = /^([xf]?(it|test|describe|suite|context|specify)|(before|after)(Each|All)?)$/;
+
 // ── Call expression extraction ───────────────────────────────────────────────
 // Finds all function calls made inside a given node's body
 // Returns raw call names — resolved to IDs by chunkProcessor
@@ -70,104 +85,6 @@ function extractCallNames(node: Node): string[] {
     return [...calls];
 }
 
-// ── Retrieval signal detectors ───────────────────────────────────────────────
-// These run on the source text of each function body — no extra AST traversal.
-// We call node.getText() which ts-morph provides cheaply from its internal cache.
-
-/**
- * Detect if a function contains authorization or permission-checking logic.
- *
- * Rationale for each pattern:
- *   - checkAuth / requireAuth / verifyAuth / isAuthenticated: common auth utility names
- *   - hasPermission / checkPermission / canAccess / isAuthorized: role/permission check calls
- *   - context.user / ctx.user / req.user: reading user from request/context (access control)
- *   - creatorId / userId comparisons or ownership checks (common in GraphQL resolvers)
- *   - throw.*Unauthorized / throw.*Forbidden / throw.*AuthError: throwing auth errors
- *   - roles.includes / user.role / userRole: role-based access control patterns
- *   - session.userId / session.user: session-based auth checks
- *
- * We use a regex on the full source text (case-insensitive) rather than
- * individual call expressions to catch both call-based and throw-based patterns
- * without a second traversal pass.
- *
- * Avoiding false positives:
- *   - We do NOT flag mere imports of auth utilities (those live in the import
- *     declarations, not the function body text)
- *   - Minimum 2-char method names keep us from matching on 'auth' in variable names
- */
-const AUTH_PATTERNS = [
-    // Auth check function calls
-    /\b(checkAuth|requireAuth|verifyAuth|ensureAuth|authenticate|isAuthenticated)\s*\(/i,
-    // Permission/role check calls
-    /\b(hasPermission|checkPermission|canAccess|isAuthorized|requireRole|checkRole)\s*\(/i,
-    // User from context/request — reading it means the function cares about identity
-    /\b(context|ctx|req)\.(user|currentUser|loggedInUser|viewer)\b/i,
-    // Ownership checks: creatorId, userId comparisons
-    /\b(creatorId|ownerId|userId)\s*[!=]==/,
-    // Throwing auth errors — the function is a gatekeeper
-    /throw\s+new\s+\w*(Unauthorized|Forbidden|AuthorizationError|AccessDenied|AuthError)/i,
-    // Role-based checks
-    /\b(roles?)\.includes\s*\(/i,
-    /\buser\.(role|roles|permissions)\b/i,
-    // Session-based auth
-    /\bsession\.(userId|user|isAuthenticated)\b/i,
-    // JWT decode/verify calls inside the function body
-    /\b(jwt\.verify|verifyToken|decodeToken)\s*\(/i,
-];
-
-function detectAuthCheck(sourceText: string): boolean {
-    return AUTH_PATTERNS.some(pattern => pattern.test(sourceText));
-}
-
-/**
- * Detect if a function contains database operations.
- *
- * Rationale for each pattern:
- *   Prisma:    prisma.model.findUnique/findFirst/findMany/create/update/delete/upsert
- *   Mongoose:  Model.find/findOne/findById/save/create/update/deleteOne
- *   TypeORM:   repository.find/findOne/save/delete/update, getRepository(), createQueryBuilder()
- *   Sequelize: Model.findOne/findAll/create/update/destroy
- *   Raw SQL:   db.query(), pool.query(), client.query(), knex()
- *   Drizzle:   db.select()/insert()/update()/delete() — common in modern TS backends
- *
- * We look for the method call name patterns rather than the object name
- * so we catch any ORM's syntax. This means we check for .findOne( / .findMany(
- * regardless of whether the receiver is called 'prisma', 'User', or 'repo'.
- *
- * Avoiding false positives:
- *   - Array methods like Array.find / Array.findIndex are excluded by requiring
- *     the 'One'/'Many'/'First'/'All' suffix or checking for DB-specific names.
- *   - We use word boundaries and require parentheses to confirm it's a call.
- */
-const DB_PATTERNS = [
-    // findOne / findMany / findFirst / findAll / findById / findUnique
-    /\.find(One|Many|First|All|ById|Unique|AndCount)?\s*\(/i,
-    // create / createMany / createQueryBuilder
-    /\.(create|createMany|createQueryBuilder)\s*\(/i,
-    // save / saveAll
-    /\.(save|saveAll)\s*\(/i,
-    // update / updateOne / updateMany / upsert
-    /\.(update|updateOne|updateMany|upsert)\s*\(/i,
-    // delete / deleteOne / deleteMany / destroy / remove
-    /\.(delete|deleteOne|deleteMany|destroy|remove)\s*\(/i,
-    // insert / insertMany / insertOne
-    /\.(insert|insertMany|insertOne)\s*\(/i,
-    // aggregate / count / exists
-    /\.(aggregate|count|exists|sum|avg|max|min)\s*\(/i,
-    // Raw SQL: db.query, pool.query, client.query, connection.query
-    /\b(db|pool|client|connection|knex|sql)\.query\s*\(/i,
-    // Drizzle ORM: db.select(), db.insert(), db.update(), db.delete()
-    /\bdb\.(select|insert|update|delete)\s*\(/i,
-    // getRepository() or getManager() — TypeORM
-    /\b(getRepository|getManager|getConnection)\s*\(/i,
-    // Prisma-specific: .$transaction, .$queryRaw, .$executeRaw
-    /\.\$(transaction|queryRaw|executeRaw|connect|disconnect)\s*\(/i,
-];
-
-function detectDatabaseCall(sourceText: string): boolean {
-    return DB_PATTERNS.some(pattern => pattern.test(sourceText));
-}
-
 // ── Function extractors ──────────────────────────────────────────────────────
 
 function determineFunctionKind(
@@ -184,10 +101,11 @@ function determineFunctionKind(
     // Priority 3: setter
     if (node.getKind() === SyntaxKind.SetAccessor) return "setter";
 
-    // Priority 4: test
-    if (name.startsWith("describe(") || name.startsWith("it(") || name.startsWith("test(") || 
-        name.startsWith("suite(") || name.startsWith("beforeEach(") || name.startsWith("afterEach(") ||
-        name.startsWith("beforeAll(") || name.startsWith("afterAll(")) {
+    // Priority 4: test — generalized across all test frameworks via TEST_CALL_PATTERN
+    // Names look like: "describe(TagFolder childFolders)", "it(should throw...)", etc.
+    // The regex matches the opening call name before the first "("
+    if (/^[xf]?(it|test|describe|suite|context|specify)\(/.test(name) ||
+        /^(before|after)(Each|All)?\(/.test(name)) {
         return "test";
     }
 
@@ -207,7 +125,7 @@ function determineFunctionKind(
         }
     }
 
-    // Priority 6: middleware (or alternatively 2-param route handler if not caught by #5, but the instructions say apply middleware check to params)
+    // Priority 6: middleware
     let params: any[] = [];
     if (
         Node.isFunctionDeclaration(node) ||
@@ -217,7 +135,7 @@ function determineFunctionKind(
     ) {
         params = node.getParameters();
     }
-    
+
     if (params.length === 3) {
         const p1 = params[0].getName();
         const p2 = params[1].getName();
@@ -242,7 +160,6 @@ function determineFunctionKind(
     }
     if (isNodeAsync) return "async";
 
-    // Fallbacks (method, arrow, function, unknown) are passed via defaultKind based on extraction point
     if (defaultKind === "method") return "method";
     if (defaultKind === "arrow") return "arrow";
     if (defaultKind === "function") return "function";
@@ -254,7 +171,7 @@ function extractFromFunctionDeclaration(
     relativePath: string
 ): FunctionNode | null {
     const name = node.getName();
-    if (!name) return null; // anonymous function declaration — skip
+    if (!name) return null;
 
     const sourceText = node.getText();
     return {
@@ -269,8 +186,6 @@ function extractFromFunctionDeclaration(
         calls: extractCallNames(node),
         calledBy: [],
         analysisConfidence: "high",
-        hasAuthCheck: detectAuthCheck(sourceText),
-        hasDatabaseCall: detectDatabaseCall(sourceText),
     };
 }
 
@@ -279,30 +194,41 @@ function extractFromArrowOrExpression(
     relativePath: string
 ): FunctionNode | null {
     const parent = node.getParent();
+
     if (parent) {
-        if (Node.isPropertyAssignment(parent) || Node.isCallExpression(parent)) {
-            // Check if it's a valid test or route handler
-            let isTestOrRoute = false;
-            if (Node.isCallExpression(parent)) {
-                const callExpr = parent as any;
-                const exprText = callExpr.getExpression?.()?.getText?.() || "";
-                if (/^(it|test|describe|suite|beforeEach|afterEach|beforeAll|afterAll)$/.test(exprText)) {
-                    isTestOrRoute = true;
-                } else if (/\.(get|post|put|delete|patch|use|all)$/i.test(exprText)) {
-                    isTestOrRoute = true;
-                }
-            }
-            if (!isTestOrRoute) {
-                return null; // skip invalid function
+        if (Node.isCallExpression(parent)) {
+            // For CallExpression parents: only extract test runners and route handlers.
+            //
+            // We explicitly SKIP functional array callbacks (.map, .filter, .reduce etc.)
+            // and generic promise chains (.then, .catch) — these are never useful snippets.
+            //
+            // Everything else (including framework builders like builder.mutationField)
+            // is skipped here but will be captured as a STRUCTURE in extractStructures,
+            // which is sufficient to prevent false barrel detection.
+            const callExpr = parent as any;
+            const exprText = callExpr.getExpression?.()?.getText?.() || "";
+
+            const isTestCall = TEST_CALL_PATTERN.test(exprText);
+            const isRouteCall = /\.(get|post|put|delete|patch|head|options|use|all|route|handle)$/i.test(exprText);
+
+            if (!isTestCall && !isRouteCall) {
+                return null;
             }
         }
+
+        // PropertyAssignment: ALLOW — we now extract these.
+        //
+        // This enables function body extraction from patterns like:
+        //   { resolve: async (_parent, args, ctx) => { ... } }   ← GraphQL resolvers
+        //   { handler: async (req, res) => { ... } }             ← route config objects
+        //   { middleware: async (ctx, next) => { ... } }         ← middleware configs
+        //   { transform: async (data) => { ... } }               ← data pipeline steps
+        //
+        // Trivial one-liner non-async callbacks are filtered out below
+        // after name resolution to avoid noise like { transform: x => x.id }.
     }
 
     // Walk up the parent chain to find a name for this function.
-    // Handles: const foo = () => {}
-    //          { foo: function() {} }
-    //          exports.foo = () => {}
-    //          module.exports.foo = function() {}
     let name: string | undefined;
     let current: Node | undefined = node.getParent();
 
@@ -333,25 +259,24 @@ function extractFromArrowOrExpression(
             }
         }
 
-        // Passed as argument to a CallExpression (e.g., describe("foo", () => {}), map(() => {}))
+        // Passed as argument to a CallExpression
+        // (e.g., describe("foo", () => {}), it("bar", async () => {}))
         if (kind === SyntaxKind.CallExpression) {
             const callExpr = current as any;
             const exprText = callExpr.getExpression?.()?.getText?.();
-            if (exprText) {
-                if (/^(it|test|describe|beforeEach|afterEach|beforeAll|afterAll)$/.test(exprText)) {
-                    const args = callExpr.getArguments?.();
-                    if (args && args.length > 0) {
-                        const firstArg = args[0].getText().replace(/['"`]/g, "");
-                        name = `${exprText}(${firstArg})`;
-                    } else {
-                        name = `${exprText}()`;
-                    }
+            if (exprText && TEST_CALL_PATTERN.test(exprText)) {
+                const args = callExpr.getArguments?.();
+                if (args && args.length > 0) {
+                    const firstArg = args[0].getText().replace(/['"`]/g, "");
+                    name = `${exprText}(${firstArg})`;
+                } else {
+                    name = `${exprText}()`;
                 }
             }
             break;
         }
 
-        // Stop at function/block boundaries — don't walk outside the function scope
+        // Stop at function/block boundaries
         if (
             kind === SyntaxKind.FunctionDeclaration ||
             kind === SyntaxKind.ArrowFunction ||
@@ -365,7 +290,19 @@ function extractFromArrowOrExpression(
         current = current.getParent();
     }
 
-    if (!name) return null; // truly anonymous — skip
+    if (!name) return null;
+
+    // Filter out trivial PropertyAssignment callbacks.
+    //
+    // When parent is a PropertyAssignment (e.g., { transform: x => x.id }),
+    // skip if the function is single-line AND synchronous.
+    // Single-line async functions ARE kept because they may contain meaningful
+    // DB or auth logic: { resolve: async (p, a, ctx) => ctx.db.users.findFirst() }
+    if (parent && Node.isPropertyAssignment(parent)) {
+        const lineCount = node.getEndLineNumber() - node.getStartLineNumber();
+        const isAsyncFn = (node as any).isAsync?.() ?? false;
+        if (lineCount < 1 && !isAsyncFn) return null;
+    }
 
     const sourceText = node.getText();
     return {
@@ -376,12 +313,10 @@ function extractFromArrowOrExpression(
         endLine: node.getEndLineNumber(),
         isExported: isExported(node),
         kind: determineFunctionKind(node, name, "arrow"),
-        isAsync: node.hasModifier(SyntaxKind.AsyncKeyword),
+        isAsync: (node as any).isAsync?.() ?? false,
         calls: extractCallNames(node),
         calledBy: [],
         analysisConfidence: "high",
-        hasAuthCheck: detectAuthCheck(sourceText),
-        hasDatabaseCall: detectDatabaseCall(sourceText),
     };
 }
 
@@ -398,7 +333,6 @@ function extractFromMethod(
     const name = node.getName();
     if (!name) return null;
 
-    // prefix with class name for clarity: "MyClass.myMethod"
     const classDecl = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
     const className = classDecl?.getName();
     const fullName = className ? `${className}.${name}` : name;
@@ -418,13 +352,11 @@ function extractFromMethod(
         calls: extractCallNames(node),
         calledBy: [],
         analysisConfidence: "high",
-        hasAuthCheck: detectAuthCheck(sourceText),
-        hasDatabaseCall: detectDatabaseCall(sourceText),
     };
 }
 
 function extractFromAccessor(
-    node: Node, // GetAccessorDeclaration | SetAccessorDeclaration
+    node: Node,
     relativePath: string,
     accessorKind: "getter" | "setter"
 ): FunctionNode | null {
@@ -453,13 +385,11 @@ function extractFromAccessor(
         calls: extractCallNames(node),
         calledBy: [],
         analysisConfidence: "high",
-        hasAuthCheck: detectAuthCheck(sourceText),
-        hasDatabaseCall: detectDatabaseCall(sourceText),
     };
 }
 
 function extractFromConstructor(
-    node: Node, // ConstructorDeclaration
+    node: Node,
     relativePath: string
 ): FunctionNode | null {
     const classDecl = node.getFirstAncestorByKind(SyntaxKind.ClassDeclaration);
@@ -491,17 +421,10 @@ function extractFromConstructor(
         calls: extractCallNames(node),
         calledBy: [],
         analysisConfidence: "high",
-        hasAuthCheck: detectAuthCheck(sourceText),
-        hasDatabaseCall: detectDatabaseCall(sourceText),
     };
 }
 
 // ── CommonJS exports extractor ───────────────────────────────────────────────
-// Handles:
-//   module.exports = function foo() {}
-//   module.exports = { foo: function() {} }
-//   exports.foo = function() {}
-//   module.exports.foo = function() {}
 
 const EXPORTS_LEFT_RE = /^(?:module\.)?exports(?:\.([\w$]+))?$/;
 
@@ -514,7 +437,6 @@ function extractFromCommonJS(
     sourceFile
         .getDescendantsOfKind(SyntaxKind.BinaryExpression)
         .forEach((binExpr) => {
-            // Only handle assignment expressions
             if (binExpr.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) return;
 
             const leftText = binExpr.getLeft().getText().trim();
@@ -524,18 +446,16 @@ function extractFromCommonJS(
             const right = binExpr.getRight();
             const rightKind = right.getKind();
 
-            // module.exports = function foo() {} or exports.foo = function() {}
             if (
                 rightKind === SyntaxKind.FunctionExpression ||
                 rightKind === SyntaxKind.ArrowFunction
             ) {
-                // Try to get name from: 1) function's own name, 2) left side property
                 let name: string | undefined;
                 if (rightKind === SyntaxKind.FunctionExpression) {
                     name = (right as FunctionExpression).getName();
                 }
-                if (!name) name = match[1]; // exports.foo → "foo"
-                if (!name) return; // module.exports = function() {} — anonymous, skip
+                if (!name) name = match[1];
+                if (!name) return;
 
                 const sourceText = right.getText();
                 results.push({
@@ -550,13 +470,10 @@ function extractFromCommonJS(
                     calls: extractCallNames(right),
                     calledBy: [],
                     analysisConfidence: "high",
-                    hasAuthCheck: detectAuthCheck(sourceText),
-                    hasDatabaseCall: detectDatabaseCall(sourceText),
                 });
                 return;
             }
 
-            // module.exports = { foo: function() {}, bar: () => {} }
             if (rightKind === SyntaxKind.ObjectLiteralExpression) {
                 right.getDescendantsOfKind(SyntaxKind.PropertyAssignment).forEach((prop) => {
                     const propName = prop.getName();
@@ -583,8 +500,6 @@ function extractFromCommonJS(
                             calls: extractCallNames(init),
                             calledBy: [],
                             analysisConfidence: "high",
-                            hasAuthCheck: detectAuthCheck(sourceText),
-                            hasDatabaseCall: detectDatabaseCall(sourceText),
                         });
                     }
                 });
@@ -594,25 +509,35 @@ function extractFromCommonJS(
     return results;
 }
 
-// ── Main extractor ───────────────────────────────────────────────────────────
+// ── Structure extractor ──────────────────────────────────────────────────────
 
 function extractStructures(
     sourceFile: SourceFile,
     relativePath: string
 ): StructureNode[] {
     const structures: StructureNode[] = [];
-    
+
+    // ── Part 1: Exported variable declarations with call initializers ─────────
+    //
+    // Catches patterns like:
+    //   export const mutationSchema = z.object({...})
+    //   export const MutationUpdateUserPasswordInput = builder.inputRef(...)
+    //   export const router = express.Router()
+    //
+    // These are already detected in the existing code. They count as structures
+    // because they define named, exported values that may be used elsewhere.
+
     sourceFile.getDescendantsOfKind(SyntaxKind.VariableDeclaration).forEach(varDecl => {
         const varStatement = varDecl.getFirstAncestorByKind(SyntaxKind.VariableStatement);
         const isExp = varStatement ? isExported(varStatement) : false;
         if (!isExp) return;
-        
+
         const initializer = varDecl.getInitializer();
         if (!initializer || initializer.getKind() !== SyntaxKind.CallExpression) return;
-        
+
         const name = varDecl.getName();
         if (!name) return;
-        
+
         structures.push({
             id: makeFunctionId(relativePath, name),
             name,
@@ -622,16 +547,74 @@ function extractStructures(
             isExported: true,
         });
     });
-    
+
+    // ── Part 2: Top-level ExpressionStatement → CallExpression ───────────────
+    //
+    // THE CRITICAL FIX: catches side-effectful registration patterns that are
+    // NOT exported variable declarations but still define the file's behavior.
+    //
+    // Examples across frameworks (ALL generalized — no hardcoding):
+    //   Pothos GraphQL:  builder.mutationField("updatePassword", ...)
+    //   Pothos GraphQL:  builder.queryField("users", ...)
+    //   Express:         app.use("/api", router)
+    //   Express:         router.get("/health", handler)
+    //   Mongoose:        schema.plugin(mongoosePaginate)
+    //   NestJS:          NestFactory.create(AppModule)
+    //   InversifyJS:     container.bind(UserService).toSelf()
+    //   EventEmitter:    emitter.on("data", handler)
+    //   Any framework:   someRegistry.register("name", implementation)
+    //
+    // Without this, these files show 0 functions + 0 structures → false barrel.
+    // With this, they get at least 1 structure → never barrel-dropped.
+
+    sourceFile.getStatements().forEach(stmt => {
+        // Only ExpressionStatement at the top level
+        if (stmt.getKind() !== SyntaxKind.ExpressionStatement) return;
+
+        const expr = (stmt as any).getExpression?.();
+        if (!expr || expr.getKind() !== SyntaxKind.CallExpression) return;
+
+        const calleeText = (expr as any).getExpression?.()?.getText?.() || "";
+        if (!calleeText || calleeText.length > 150) return;
+
+        // Build a readable name:
+        //   builder.mutationField("adminUpdateUserPassword", ...) → "mutationField(adminUpdateUserPassword)"
+        //   app.use("/api/v1", router)                           → "app.use"
+        //   schema.plugin(mongoosePaginate)                      → "schema.plugin"
+        const args = (expr as any).getArguments?.() as Node[] ?? [];
+        let name: string;
+
+        const methodPart = calleeText.split(".").pop() || calleeText;
+
+        if (args.length > 0 && args[0].getKind() === SyntaxKind.StringLiteral) {
+            // First arg is a string literal → use it as the label
+            const firstArgVal = args[0].getText().replace(/^["'`]|["'`]$/g, "");
+            name = firstArgVal ? `${methodPart}(${firstArgVal})` : calleeText;
+        } else {
+            name = calleeText;
+        }
+
+        structures.push({
+            id: makeFunctionId(relativePath, name),
+            name,
+            filePath: relativePath,
+            startLine: stmt.getStartLineNumber(),
+            endLine: stmt.getEndLineNumber(),
+            isExported: false,
+        });
+    });
+
     return structures;
 }
+
+// ── Main extractor ───────────────────────────────────────────────────────────
 
 export function extractFunctionLevel(
     sourceFile: SourceFile,
     relativePath: string
 ): { functions: FunctionNode[], structures: StructureNode[] } {
     const functions: FunctionNode[] = [];
-    const seenIds = new Set<string>(); // deduplicate by ID
+    const seenIds = new Set<string>();
 
     function addIfUnique(fn: FunctionNode | null): void {
         if (!fn) return;
@@ -697,6 +680,12 @@ export function extractFunctionLevel(
     return { functions, structures: extractStructures(sourceFile, relativePath) };
 }
 
+// ── Test metadata extractor ──────────────────────────────────────────────────
+//
+// Extracts test suite and case names for the UI's "Test Intelligence" panel.
+// Uses TEST_CALL_PATTERN for generalized framework coverage — works with Jest,
+// Vitest, Mocha, Jasmine, node:test, and any framework using the same keywords.
+
 export function extractTestMetadata(
     sourceFile: SourceFile
 ): { testSuites: string[]; testCases: string[] } {
@@ -706,12 +695,16 @@ export function extractTestMetadata(
     sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression).forEach((callExpr) => {
         const callee = callExpr.getExpression().getText().trim();
         const args = callExpr.getArguments();
-        
+
         if (args.length > 0 && args[0].getKind() === SyntaxKind.StringLiteral) {
             const argText = args[0].getText().replace(/^["'`]|["'`]$/g, "");
-            if (/^(describe|suite)$/.test(callee)) {
+
+            // Suite-level: describe, suite, context (and their x/f prefixed variants)
+            if (/^[xf]?(describe|suite|context)$/.test(callee)) {
                 testSuites.push(argText);
-            } else if (/^(it|test)$/.test(callee)) {
+            }
+            // Case-level: it, test, specify (and their x/f prefixed variants)
+            else if (/^[xf]?(it|test|specify)$/.test(callee)) {
                 testCases.push(argText);
             }
         }

@@ -215,10 +215,6 @@ export default function DetailsPanel({
               value={`${(file.sizeBytes / 1024).toFixed(1)}KB`}
             />
             <InfoRow label="Status" value={file.parseStatus} />
-            <InfoRow
-              label="Entry Point"
-              value={file.isEntryPoint ? "Yes" : "No"}
-            />
             {file.cycleScore !== undefined && file.cycleScore > 0 && (
               <InfoRow label="Cycle" value="⚠ Circular Dep" />
             )}

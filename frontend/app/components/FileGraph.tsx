@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, memo, useMemo } from "react";
 import * as d3 from "d3";
 import dagre from "dagre";
-import type { FileNodeDTO, ImportEdgeDTO } from "../lib/types";
+import type { FileNodeDTO, ImportEdgeDTO, RepoModuleDTO } from "../lib/types";
 import { getLanguageColor, getFolderGroup } from "../lib/graphHelpers";
 import { SimNode, SimLink, getRadius, trunc, brightenColor } from "./graphTypes";
 
@@ -20,6 +20,7 @@ interface FileGraphProps {
   focusMode?: boolean;
   zoomToNodeRef?: React.MutableRefObject<((fileId: string) => void) | null>;
   filteredNodeIds?: Set<string>;
+  modules?: RepoModuleDTO[];
 }
 
 import FocusExplorer from "./FocusExplorer";
@@ -38,7 +39,7 @@ function getDominantLanguageColor(nodes: SimNode[]): string {
 
 function FileGraph({
   files, edges, onFileClick, searchQuery, selectedFileId, resetZoomRef, highlightedIssueFiles = new Map(),
-  focusMode = false, zoomToNodeRef, filteredNodeIds,
+  focusMode = false, zoomToNodeRef, filteredNodeIds, modules = [],
 }: FileGraphProps) {
   const mainContainerRef = useRef<HTMLDivElement>(null);
   const focusContainerRef = useRef<HTMLDivElement>(null);
@@ -76,6 +77,16 @@ function FileGraph({
   const mainGraphZoomBeforeFocusRef = useRef<d3.ZoomTransform | null>(null);
 
   useEffect(() => { onFileClickRef.current = onFileClick; }, [onFileClick]);
+  const representativeFilesSet = useMemo(() => {
+    const set = new Set<string>();
+    modules.forEach((m: RepoModuleDTO) => {
+      if (m.representativeFiles) {
+        m.representativeFiles.forEach((f: string) => set.add(f));
+      }
+    });
+    return set;
+  }, [modules]);
+
   useEffect(() => { selectedFileIdRef.current = selectedFileId; }, [selectedFileId]);
 
   // ── Issue-highlight ring — orange rings sized by confidence ───────────────────
@@ -89,7 +100,7 @@ function FileGraph({
     // Reset node colors back to normal
     nodeGRef.current.selectAll<SVGCircleElement, SimNode>(".node-circle")
       .attr("fill", d => {
-        if (d.data.isEntryPoint) return "#22c55e";
+        if (representativeFilesSet.has(d.id)) return "#22c55e";
         if (d.data.isDeadCode) return "#30363d";
         return d.isHub ? brightenColor(getLanguageColor(d.data.language)) : getLanguageColor(d.data.language);
       });
@@ -103,13 +114,13 @@ function FileGraph({
           const strokeWidth = confidence >= 80 ? 3 : confidence >= 50 ? 2 : 1;
           const opacity = confidence >= 80 ? 1.0 : confidence >= 50 ? 0.8 : 0.6;
           d3.select(this)
-            .attr("r", getRadius(d) + 10)
+            .attr("r", getRadius(d, representativeFilesSet) + 10)
             .attr("stroke-width", strokeWidth)
             .attr("stroke-opacity", opacity)
             .attr("fill-opacity", 0.1);
         });
     }
-  }, [highlightedIssueFiles]);
+  }, [highlightedIssueFiles, representativeFilesSet]);
 
   // ── Focus mode & Filter bar (Correction 3) ──────────────────────────────────
   useEffect(() => {
@@ -175,10 +186,10 @@ function FileGraph({
       nodeGRef.current
         .filter((d: SimNode) => d.id === selectedFileId)
         .select<SVGCircleElement>(".sel-ring")
-        .attr("r", (d: SimNode) => getRadius(d) + 7)
+        .attr("r", (d: SimNode) => getRadius(d, representativeFilesSet) + 7)
         .attr("stroke-opacity", 1);
     }
-  }, [selectedFileId]);
+  }, [selectedFileId, representativeFilesSet]);
 
   // ── Main graph build ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -223,7 +234,7 @@ function FileGraph({
         degreeMap.set(e.target, (degreeMap.get(e.target) || 0) + 1);
       }
 
-      const getImportance = (f: FileNodeDTO) => (inDegrees.get(f.id) || 0) * 1.2 + (outDegrees.get(f.id) || 0) * 1.0 + (f.isEntryPoint ? 5 : 0);
+      const getImportance = (f: FileNodeDTO) => (inDegrees.get(f.id) || 0) * 1.2 + (outDegrees.get(f.id) || 0) * 1.0 + (representativeFilesSet.has(f.id) ? 5 : 0);
 
       const sorted = [...degreeMap.values()].sort((a, b) => b - a);
       const top20Threshold = sorted[Math.floor(sorted.length * 0.20)] ?? 3;
@@ -285,8 +296,8 @@ function FileGraph({
         }
         onStack.delete(u);
       };
-      // Start DFS from entry points first, then others
-      files.filter(f => f.isEntryPoint).forEach(f => { if (!visited.has(f.id)) dfs(f.id); });
+      // Start DFS from core files first, then others
+      files.filter(f => representativeFilesSet.has(f.id)).forEach(f => { if (!visited.has(f.id)) dfs(f.id); });
       files.forEach(f => { if (!visited.has(f.id)) dfs(f.id); });
 
       let disconnectedIndex = 0;
@@ -295,8 +306,8 @@ function FileGraph({
           const n = nodeMap.get(f.id);
           if (n) {
             gDagre.setNode(f.id, {
-              width: getRadius(n) * 2 + 10,
-              height: getRadius(n) * 2 + 10,
+              width: getRadius(n, representativeFilesSet) * 2 + 10,
+              height: getRadius(n, representativeFilesSet) * 2 + 10,
             });
           }
         }
@@ -426,7 +437,7 @@ function FileGraph({
 
       nodeG.each(function (d) {
         const g2 = d3.select(this);
-        const r = getRadius(d);
+        const r = getRadius(d, representativeFilesSet);
         // Issue highlight ring (orange — confidence-based thickness)
         g2.append("circle").attr("class", "issue-ring").attr("r", 0)
           .attr("fill", "rgba(249,115,22,0.1)").attr("stroke", "#f97316").attr("stroke-width", 2)
@@ -443,8 +454,8 @@ function FileGraph({
         if (d.data.kind === "config") {
           g2.append("path").attr("d", `M0,${-r} L${r},0 L0,${r} L${-r},0 Z`).attr("fill", "#6b7280");
         } else {
-          const circle = g2.append("circle").attr("r", r);
-          if (d.data.isEntryPoint) {
+          const circle = g2.append("circle").attr("class", "node-circle").attr("r", r);
+          if (representativeFilesSet.has(d.id)) {
             circle.attr("fill", "#22c55e");
             g2.append("circle").attr("r", r + 5).attr("fill", "none")
               .attr("stroke", "#22c55e").attr("stroke-width", 1.5).attr("stroke-opacity", 0.35).attr("pointer-events", "none");
@@ -468,7 +479,7 @@ function FileGraph({
         // Label — plain text only, no background box, shown for ALL nodes
         const textLabel = trunc(d.data.label, 20);
         let fontSize = "13px";
-        if (d.data.isEntryPoint) fontSize = "14px";
+        if (representativeFilesSet.has(d.id)) fontSize = "14px";
         else fontSize = "13px";
 
         const labelGroup = g2.append("g")
@@ -495,7 +506,7 @@ function FileGraph({
       nodeG
         .on("mouseover", function (ev, d) {
           if (selectedFileIdRef.current) return; // don't hover-highlight if something is locked
-          d3.select(this).select(".hover-ring").attr("r", getRadius(d) + 4).attr("stroke-opacity", 0.8);
+          d3.select(this).select(".hover-ring").attr("r", getRadius(d, representativeFilesSet) + 4).attr("stroke-opacity", 0.8);
 
           const conn = new Set([d.id]);
           links.forEach(l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; if (s === d.id) conn.add(t); if (t === d.id) conn.add(s); });
@@ -504,7 +515,7 @@ function FileGraph({
             .attr("stroke-opacity", l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; return s === d.id || t === d.id ? 1 : 0.03; })
             .attr("marker-end", l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; return s === d.id || t === d.id ? "url(#arrow-highlight)" : "url(#arrow-default)"; });
           tooltip.style("opacity", "1")
-            .html(`<strong>${d.data.label}</strong><br/><span style="color:#8b949e">${d.data.path}</span><br/>${d.data.language} · ${d.data.lineCount} lines${d.data.isEntryPoint ? ' · <span style="color:#22c55e">entry</span>' : ""}`)
+            .html(`<strong>${d.data.label}</strong><br/><span style="color:#8b949e">${d.data.path}</span><br/>${d.data.language} · ${d.data.lineCount} lines${representativeFilesSet.has(d.id) ? ' · <span style="color:#22c55e">core</span>' : ""}`)
             .style("left", (ev.offsetX + 16) + "px").style("top", (ev.offsetY - 10) + "px");
         })
         .on("mouseout", function (_ev, d) {
@@ -535,12 +546,12 @@ function FileGraph({
         .alphaDecay(0.05)
         .velocityDecay(0.6)
         .force("link", d3.forceLink<SimNode, SimLink>(links).id(d => d.id).distance(link =>
-          (link.source as SimNode).data?.isEntryPoint || (link.target as SimNode).data?.isEntryPoint ? 200 : 150
+          representativeFilesSet.has((link.source as SimNode).id) || representativeFilesSet.has((link.target as SimNode).id) ? 200 : 150
         ))
         .force("charge", d3.forceManyBody<SimNode>().strength(-450))
         .force("collision", d3.forceCollide<SimNode>().radius(d => {
-          let r = getRadius(d) + 30;
-          if (d.data.isEntryPoint) r += 50;
+          let r = getRadius(d, representativeFilesSet) + 30;
+          if (representativeFilesSet.has(d.id)) r += 50;
           else if (d.isHub) r += 30;
           return r;
         }).iterations(3))
@@ -582,7 +593,7 @@ function FileGraph({
     }
 
     return () => { simulationRef.current?.stop(); };
-  }, [files, edges]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [files, edges, representativeFilesSet]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Search filter ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -621,7 +632,8 @@ function FileGraph({
     onFileClickRef,
     setFocusedNodeId,
     setFocusDepth,
-    setExpandedFolders
+    setExpandedFolders,
+    representativeFilesSet
   });
 
   // ── Escape key to exit focus mode ───────────────────────────────────────────
@@ -670,7 +682,7 @@ function FileGraph({
                 <span style={{ color: "#e6edf3" }}>{label}</span>
               </div>
             ))}
-            <div className="flex items-center gap-2 mt-1"><span className="w-3 h-3 rounded-full" style={{ background: "#22c55e" }} /><span style={{ color: "#e6edf3" }}>Entry Point</span></div>
+            <div className="flex items-center gap-2 mt-1"><span className="w-3 h-3 rounded-full" style={{ background: "#22c55e" }} /><span style={{ color: "#e6edf3" }}>Core File</span></div>
             <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full border border-dashed" style={{ borderColor: "#22c55e" }} /><span style={{ color: "#e6edf3" }}>Test file</span></div>
             <div className="flex items-center gap-2"><span className="w-3 h-0.5" style={{ background: "#f85149", borderTop: "2px dashed #f85149" }} /><span style={{ color: "#e6edf3" }}>Circular Dep</span></div>
             <div className="flex items-center gap-2"><svg width="12" height="12" viewBox="0 0 20 20"><path d="M10 0L20 10L10 20L0 10Z" fill="#6b7280" /></svg><span style={{ color: "#e6edf3" }}>Config</span></div>
