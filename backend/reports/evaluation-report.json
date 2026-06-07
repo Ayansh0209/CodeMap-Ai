@@ -1,0 +1,1496 @@
+{
+  "generatedAt": "2026-06-07T17:43:29.245Z",
+  "totalIssuesEvaluated": 18,
+  "totalIssuesInDataset": 18,
+  "validDatasetEntries": 18,
+  "skippedEntries": 0,
+  "overall": {
+    "issueCount": 18,
+    "avgPrecision": 0.3056,
+    "avgRecall": 0.0585,
+    "avgF1": 0.0901,
+    "avgRecallAt5": 0.0585,
+    "avgRecallAt10": 0.0585,
+    "avgRecallAt20": 0.0585,
+    "nonZeroF1Rate": 0.3333,
+    "highRecallRate": 0.0556
+  },
+  "bySize": {
+    "small": {
+      "issueCount": 7,
+      "avgPrecision": 0.6429,
+      "avgRecall": 0.1347,
+      "avgF1": 0.2032,
+      "avgRecallAt5": 0.1347,
+      "avgRecallAt10": 0.1347,
+      "avgRecallAt20": 0.1347,
+      "nonZeroF1Rate": 0.7143,
+      "highRecallRate": 0.1429
+    },
+    "medium": {
+      "issueCount": 7,
+      "avgPrecision": 0,
+      "avgRecall": 0,
+      "avgF1": 0,
+      "avgRecallAt5": 0,
+      "avgRecallAt10": 0,
+      "avgRecallAt20": 0,
+      "nonZeroF1Rate": 0,
+      "highRecallRate": 0
+    },
+    "large": {
+      "issueCount": 4,
+      "avgPrecision": 0.25,
+      "avgRecall": 0.0278,
+      "avgF1": 0.05,
+      "avgRecallAt5": 0.0278,
+      "avgRecallAt10": 0.0278,
+      "avgRecallAt20": 0.0278,
+      "nonZeroF1Rate": 0.25,
+      "highRecallRate": 0
+    },
+    "very_large": {
+      "issueCount": 0,
+      "avgPrecision": 0,
+      "avgRecall": 0,
+      "avgF1": 0,
+      "avgRecallAt5": 0,
+      "avgRecallAt10": 0,
+      "avgRecallAt20": 0,
+      "nonZeroF1Rate": 0,
+      "highRecallRate": 0
+    }
+  },
+  "byRepo": {
+    "PalisadoesFoundation/talawa-api": {
+      "issueCount": 3,
+      "avgPrecision": 1,
+      "avgRecall": 0.2059,
+      "avgF1": 0.2963,
+      "avgRecallAt5": 0.2059,
+      "avgRecallAt10": 0.2059,
+      "avgRecallAt20": 0.2059,
+      "nonZeroF1Rate": 1,
+      "highRecallRate": 0.3333
+    },
+    "colinhacks/zod": {
+      "issueCount": 4,
+      "avgPrecision": 0.375,
+      "avgRecall": 0.0813,
+      "avgF1": 0.1333,
+      "avgRecallAt5": 0.0813,
+      "avgRecallAt10": 0.0813,
+      "avgRecallAt20": 0.0813,
+      "nonZeroF1Rate": 0.5,
+      "highRecallRate": 0
+    },
+    "trpc/trpc": {
+      "issueCount": 4,
+      "avgPrecision": 0,
+      "avgRecall": 0,
+      "avgF1": 0,
+      "avgRecallAt5": 0,
+      "avgRecallAt10": 0,
+      "avgRecallAt20": 0,
+      "nonZeroF1Rate": 0,
+      "highRecallRate": 0
+    },
+    "TryGhost/Ghost": {
+      "issueCount": 3,
+      "avgPrecision": 0,
+      "avgRecall": 0,
+      "avgF1": 0,
+      "avgRecallAt5": 0,
+      "avgRecallAt10": 0,
+      "avgRecallAt20": 0,
+      "nonZeroF1Rate": 0,
+      "highRecallRate": 0
+    },
+    "nestjs/nest": {
+      "issueCount": 4,
+      "avgPrecision": 0.25,
+      "avgRecall": 0.0278,
+      "avgF1": 0.05,
+      "avgRecallAt5": 0.0278,
+      "avgRecallAt10": 0.0278,
+      "avgRecallAt20": 0.0278,
+      "nonZeroF1Rate": 0.25,
+      "highRecallRate": 0
+    }
+  },
+  "missPatterns": [
+    {
+      "category": "business_logic",
+      "count": 50,
+      "percentage": 63.3,
+      "exampleFiles": [
+        "scripts/setup/services/envSetup.ts",
+        "scripts/setup/services/metricsSetup.ts",
+        "scripts/setup/services/minioSetup.ts",
+        "scripts/setup/services/oauthSetup.ts",
+        "scripts/setup/services/observabilitySetup.ts"
+      ]
+    },
+    {
+      "category": "test",
+      "count": 28,
+      "percentage": 35.4,
+      "exampleFiles": [
+        "test/scripts/setup/envSetup.spec.ts",
+        "test/scripts/setup/setup.test.ts",
+        "test/scripts/setup/updateEnvVariable.test.ts",
+        "test/unit/setup/gracefulCleanup.test.ts",
+        "test/scripts/setup/envSetup.spec.ts"
+      ]
+    },
+    {
+      "category": "config",
+      "count": 1,
+      "percentage": 1.3,
+      "exampleFiles": [
+        "packages/treeshake/vitest.config.ts"
+      ]
+    }
+  ],
+  "recommendations": [
+    {
+      "rank": 1,
+      "title": "Retrieval index is missing most relevant files",
+      "description": "Overall recall is below 30%. The Stage 1 token traversal is not surfacing enough candidates. Consider expanding token extraction from issue bodies and lowering MIN_CANDIDATES_FOR_STAGE1 threshold.",
+      "impactedMetric": "recall",
+      "estimatedImpact": "high",
+      "evidenceSummary": "Average recall=0.06 across 18 issues"
+    },
+    {
+      "rank": 2,
+      "title": "Test files are not surfaced alongside implementation",
+      "description": "When a bug fix changes an implementation file, the corresponding test file is often missed. Consider adding neighbouring test-file expansion to Stage 1 graph traversal.",
+      "impactedMetric": "recall",
+      "estimatedImpact": "medium",
+      "evidenceSummary": "28 test files missed (35.4%)"
+    },
+    {
+      "rank": 3,
+      "title": "Top-5 predictions are poorly ranked",
+      "description": "Recall@5 is below 20%, meaning the highest-confidence predictions rarely contain the real files. Improving confidence scoring in Stage 3 (e.g. considering architectural importance) would help.",
+      "impactedMetric": "recall@k",
+      "estimatedImpact": "high",
+      "evidenceSummary": "Average Recall@5=0.06"
+    }
+  ],
+  "perIssue": [
+    {
+      "entry": {
+        "id": "talawa-1",
+        "owner": "PalisadoesFoundation",
+        "repo": "talawa-api",
+        "size": "small",
+        "issueNumber": 4324,
+        "prNumber": 5351,
+        "description": "Setup2Fix - Implement Simple Signal Handling",
+        "tags": [
+          "feature",
+          "infrastructure"
+        ]
+      },
+      "issueTitle": "Setup2Fix - Implement Simple Signal Handling",
+      "issueUrl": "https://github.com/PalisadoesFoundation/talawa-api/issues/4324",
+      "predictedFiles": [
+        {
+          "fileId": "scripts/setup/setup.ts",
+          "confidence": 100,
+          "reason": "The issue explicitly states this file needs editing. The provided `gracefulCleanup` function contains the core logic, but it needs to be invoked by the new signal handlers and its exit code logic must be corrected to `exit(1)` on interrupt, as it currently exits with `0`."
+        }
+      ],
+      "actualFiles": [
+        "scripts/setup/services/envSetup.ts",
+        "scripts/setup/services/metricsSetup.ts",
+        "scripts/setup/services/minioSetup.ts",
+        "scripts/setup/services/oauthSetup.ts",
+        "scripts/setup/services/observabilitySetup.ts",
+        "scripts/setup/services/postgresSetup.ts",
+        "scripts/setup/services/reCaptchaSetup.ts",
+        "scripts/setup/services/restAuthSetup.ts",
+        "scripts/setup/services/setupOrchestrator.ts",
+        "scripts/setup/services/sharedSetup.ts",
+        "scripts/setup/services/validationSetup.ts",
+        "scripts/setup/setup.ts",
+        "setup.ts",
+        "test/scripts/setup/envSetup.spec.ts",
+        "test/scripts/setup/setup.test.ts",
+        "test/scripts/setup/updateEnvVariable.test.ts",
+        "test/unit/setup/gracefulCleanup.test.ts"
+      ],
+      "matchedFiles": [
+        "scripts/setup/setup.ts"
+      ],
+      "missedFiles": [
+        "scripts/setup/services/envSetup.ts",
+        "scripts/setup/services/metricsSetup.ts",
+        "scripts/setup/services/minioSetup.ts",
+        "scripts/setup/services/oauthSetup.ts",
+        "scripts/setup/services/observabilitySetup.ts",
+        "scripts/setup/services/postgresSetup.ts",
+        "scripts/setup/services/reCaptchaSetup.ts",
+        "scripts/setup/services/restAuthSetup.ts",
+        "scripts/setup/services/setupOrchestrator.ts",
+        "scripts/setup/services/sharedSetup.ts",
+        "scripts/setup/services/validationSetup.ts",
+        "setup.ts",
+        "test/scripts/setup/envSetup.spec.ts",
+        "test/scripts/setup/setup.test.ts",
+        "test/scripts/setup/updateEnvVariable.test.ts",
+        "test/unit/setup/gracefulCleanup.test.ts"
+      ],
+      "extraFiles": [],
+      "precision": 1,
+      "recall": 0.0588,
+      "f1": 0.1111,
+      "recallAt5": 0.0588,
+      "recallAt10": 0.0588,
+      "recallAt20": 0.0588,
+      "classifiedMisses": [
+        {
+          "filePath": "scripts/setup/services/envSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/metricsSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/minioSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/oauthSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/observabilitySetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/postgresSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/reCaptchaSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/restAuthSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/setupOrchestrator.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/sharedSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/validationSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "setup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "test/scripts/setup/envSetup.spec.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "test/scripts/setup/setup.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "test/scripts/setup/updateEnvVariable.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "test/unit/setup/gracefulCleanup.test.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 27606,
+      "timestamp": "2026-06-07T17:29:45.813Z"
+    },
+    {
+      "entry": {
+        "id": "talawa-2",
+        "owner": "PalisadoesFoundation",
+        "repo": "talawa-api",
+        "size": "small",
+        "issueNumber": 4323,
+        "prNumber": 5351,
+        "description": "Setup2Fix - Simplify Main Orchestrator",
+        "tags": [
+          "refactor",
+          "infrastructure"
+        ]
+      },
+      "issueTitle": "Setup2Fix - Simplify Main Orchestrator",
+      "issueUrl": "https://github.com/PalisadoesFoundation/talawa-api/issues/4323",
+      "predictedFiles": [
+        {
+          "fileId": "scripts/setup/setup.ts",
+          "confidence": 100,
+          "reason": "The issue explicitly states this file needs to be simplified. Snippets 1, 2, and 5 show large, self-contained functions like `observabilitySetup`, `metricsSetup`, and `administratorEmail` that are the source of the complexity and must be extracted."
+        }
+      ],
+      "actualFiles": [
+        "scripts/setup/services/envSetup.ts",
+        "scripts/setup/services/metricsSetup.ts",
+        "scripts/setup/services/minioSetup.ts",
+        "scripts/setup/services/oauthSetup.ts",
+        "scripts/setup/services/observabilitySetup.ts",
+        "scripts/setup/services/postgresSetup.ts",
+        "scripts/setup/services/reCaptchaSetup.ts",
+        "scripts/setup/services/restAuthSetup.ts",
+        "scripts/setup/services/setupOrchestrator.ts",
+        "scripts/setup/services/sharedSetup.ts",
+        "scripts/setup/services/validationSetup.ts",
+        "scripts/setup/setup.ts",
+        "setup.ts",
+        "test/scripts/setup/envSetup.spec.ts",
+        "test/scripts/setup/setup.test.ts",
+        "test/scripts/setup/updateEnvVariable.test.ts",
+        "test/unit/setup/gracefulCleanup.test.ts"
+      ],
+      "matchedFiles": [
+        "scripts/setup/setup.ts"
+      ],
+      "missedFiles": [
+        "scripts/setup/services/envSetup.ts",
+        "scripts/setup/services/metricsSetup.ts",
+        "scripts/setup/services/minioSetup.ts",
+        "scripts/setup/services/oauthSetup.ts",
+        "scripts/setup/services/observabilitySetup.ts",
+        "scripts/setup/services/postgresSetup.ts",
+        "scripts/setup/services/reCaptchaSetup.ts",
+        "scripts/setup/services/restAuthSetup.ts",
+        "scripts/setup/services/setupOrchestrator.ts",
+        "scripts/setup/services/sharedSetup.ts",
+        "scripts/setup/services/validationSetup.ts",
+        "setup.ts",
+        "test/scripts/setup/envSetup.spec.ts",
+        "test/scripts/setup/setup.test.ts",
+        "test/scripts/setup/updateEnvVariable.test.ts",
+        "test/unit/setup/gracefulCleanup.test.ts"
+      ],
+      "extraFiles": [],
+      "precision": 1,
+      "recall": 0.0588,
+      "f1": 0.1111,
+      "recallAt5": 0.0588,
+      "recallAt10": 0.0588,
+      "recallAt20": 0.0588,
+      "classifiedMisses": [
+        {
+          "filePath": "scripts/setup/services/envSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/metricsSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/minioSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/oauthSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/observabilitySetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/postgresSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/reCaptchaSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/restAuthSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/setupOrchestrator.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/sharedSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/setup/services/validationSetup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "setup.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "test/scripts/setup/envSetup.spec.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "test/scripts/setup/setup.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "test/scripts/setup/updateEnvVariable.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "test/unit/setup/gracefulCleanup.test.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 25519,
+      "timestamp": "2026-06-07T17:30:15.420Z"
+    },
+    {
+      "entry": {
+        "id": "talawa-4",
+        "owner": "PalisadoesFoundation",
+        "repo": "talawa-api",
+        "size": "small",
+        "issueNumber": 5333,
+        "prNumber": 5334,
+        "description": "Fix: Remove OAuth account linking from SignInWithOAuth",
+        "tags": [
+          "bug",
+          "auth"
+        ]
+      },
+      "issueTitle": "Fix: Remove Oauth account linking from SignInWithOAuth",
+      "issueUrl": "https://github.com/PalisadoesFoundation/talawa-api/issues/5333",
+      "predictedFiles": [
+        {
+          "fileId": "src/graphql/types/Mutation/signInWithOAuth.ts",
+          "confidence": 100,
+          "reason": "The issue description explicitly states that this file contains the account linking fallback logic that needs to be removed from the `signInWithOAuth` mutation."
+        }
+      ],
+      "actualFiles": [
+        "src/graphql/types/Mutation/signInWithOAuth.ts",
+        "test/graphql/types/Mutation/signInWithOAuth.test.ts"
+      ],
+      "matchedFiles": [
+        "src/graphql/types/Mutation/signInWithOAuth.ts"
+      ],
+      "missedFiles": [
+        "test/graphql/types/Mutation/signInWithOAuth.test.ts"
+      ],
+      "extraFiles": [],
+      "precision": 1,
+      "recall": 0.5,
+      "f1": 0.6667,
+      "recallAt5": 0.5,
+      "recallAt10": 0.5,
+      "recallAt20": 0.5,
+      "classifiedMisses": [
+        {
+          "filePath": "test/graphql/types/Mutation/signInWithOAuth.test.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 29840,
+      "timestamp": "2026-06-07T17:30:42.946Z"
+    },
+    {
+      "entry": {
+        "id": "zod-1",
+        "owner": "colinhacks",
+        "repo": "zod",
+        "size": "small",
+        "issueNumber": 4168,
+        "prNumber": 4206,
+        "description": "[i18n] Request for internationalization (locales)",
+        "tags": [
+          "feature"
+        ]
+      },
+      "issueTitle": "[i18n] Request for internationalization (locales)",
+      "issueUrl": "https://github.com/colinhacks/zod/issues/4168",
+      "predictedFiles": [
+        {
+          "fileId": "packages/core/locales.ts",
+          "confidence": 100,
+          "reason": "The issue explicitly instructs contributors to export their new locale from this file to make it available for import and use within the Zod library."
+        },
+        {
+          "fileId": "packages/docs/content/error-customization.mdx",
+          "confidence": 100,
+          "reason": "The issue requires contributors to add their new language variant to the 'Locales' section of this documentation file to inform users about its availability."
+        },
+        {
+          "fileId": "packages/core/src/locales/en.ts",
+          "confidence": 90,
+          "reason": "The issue specifies that this file should be used as the template or starting point for creating new locale files, as it contains all the error message keys that need to be translated."
+        }
+      ],
+      "actualFiles": [
+        "packages/core/src/locales.ts",
+        "packages/core/src/locales/ko.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/core/src/locales.ts",
+        "packages/core/src/locales/ko.ts"
+      ],
+      "extraFiles": [
+        "packages/core/locales.ts",
+        "packages/docs/content/error-customization.mdx",
+        "packages/core/src/locales/en.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/core/src/locales.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/core/src/locales/ko.ts",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 60151,
+      "timestamp": "2026-06-07T17:31:14.800Z"
+    },
+    {
+      "entry": {
+        "id": "zod-2",
+        "owner": "colinhacks",
+        "repo": "zod",
+        "size": "small",
+        "issueNumber": 5204,
+        "prNumber": 5222,
+        "description": "zod v4 compilation causes JavaScript heap out of memory",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "zod v4 compilation causes JavaScript heap out of memory",
+      "issueUrl": "https://github.com/colinhacks/zod/issues/5204",
+      "predictedFiles": [
+        {
+          "fileId": "packages/zod/src/v4/core/registries.ts",
+          "confidence": 80,
+          "reason": "This file defines the generic `registry` function and likely the underlying `$ZodRegistry` and `$ZodType` types. Complex generics are a common cause of high memory usage in the TypeScript compiler, which aligns with the reported 'heap out of memory' error."
+        },
+        {
+          "fileId": "packages/zod/src/v4/classic/schemas.ts",
+          "confidence": 70,
+          "reason": "This file defines the public schema functions like `string`, `email`, etc., for v4. The type signatures in this file, which import and use complex types from the `core`, are what the TypeScript compiler must process, triggering the high memory usage."
+        }
+      ],
+      "actualFiles": [
+        "packages/zod/src/v4/classic/schemas.ts",
+        "packages/zod/src/v4/classic/tests/codec.test.ts",
+        "packages/zod/src/v4/core/schemas.ts",
+        "packages/zod/src/v4/core/versions.ts",
+        "packages/zod/src/v4/mini/schemas.ts",
+        "packages/zod/src/v4/mini/tests/codec.test.ts",
+        "play.ts",
+        "scripts/write-stub-package-jsons.ts"
+      ],
+      "matchedFiles": [
+        "packages/zod/src/v4/classic/schemas.ts"
+      ],
+      "missedFiles": [
+        "packages/zod/src/v4/classic/tests/codec.test.ts",
+        "packages/zod/src/v4/core/schemas.ts",
+        "packages/zod/src/v4/core/versions.ts",
+        "packages/zod/src/v4/mini/schemas.ts",
+        "packages/zod/src/v4/mini/tests/codec.test.ts",
+        "play.ts",
+        "scripts/write-stub-package-jsons.ts"
+      ],
+      "extraFiles": [
+        "packages/zod/src/v4/core/registries.ts"
+      ],
+      "precision": 0.5,
+      "recall": 0.125,
+      "f1": 0.2,
+      "recallAt5": 0.125,
+      "recallAt10": 0.125,
+      "recallAt20": 0.125,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/zod/src/v4/classic/tests/codec.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "packages/zod/src/v4/core/schemas.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/zod/src/v4/core/versions.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/zod/src/v4/mini/schemas.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/zod/src/v4/mini/tests/codec.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "play.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "scripts/write-stub-package-jsons.ts",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 28205,
+      "timestamp": "2026-06-07T17:32:16.964Z"
+    },
+    {
+      "entry": {
+        "id": "zod-3",
+        "owner": "colinhacks",
+        "repo": "zod",
+        "size": "small",
+        "issueNumber": 5944,
+        "prNumber": 5945,
+        "description": "cidrv6 JSON schema emits an incomplete pattern that rejects valid IPv6 CIDRs",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "cidrv6 JSON schema emits an incomplete pattern that rejects valid IPv6 CIDRs",
+      "issueUrl": "https://github.com/colinhacks/zod/issues/5944",
+      "predictedFiles": [
+        {
+          "fileId": "packages/zod/src/v4/classic/schemas.ts",
+          "confidence": 50,
+          "reason": "This file defines the public `string` schema constructor, which is the entry point for the user-facing API `z.string().cidrv6()`. While the bug is in the core regex implementation, this file's API exposes the faulty behavior."
+        }
+      ],
+      "actualFiles": [
+        "packages/zod/src/v4/classic/tests/string.test.ts",
+        "packages/zod/src/v4/core/regexes.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/zod/src/v4/classic/tests/string.test.ts",
+        "packages/zod/src/v4/core/regexes.ts"
+      ],
+      "extraFiles": [
+        "packages/zod/src/v4/classic/schemas.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/zod/src/v4/classic/tests/string.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "packages/zod/src/v4/core/regexes.ts",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 67309,
+      "timestamp": "2026-06-07T17:32:47.170Z"
+    },
+    {
+      "entry": {
+        "id": "zod-4",
+        "owner": "colinhacks",
+        "repo": "zod",
+        "size": "small",
+        "issueNumber": 5275,
+        "prNumber": 5926,
+        "description": "Circular imports between `schemas` and `iso`",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "Circular imports between `schemas` and `iso`",
+      "issueUrl": "https://github.com/colinhacks/zod/issues/5275",
+      "predictedFiles": [
+        {
+          "fileId": "packages/zod/src/v4/classic/schemas.ts",
+          "confidence": 100,
+          "reason": "The issue report explicitly identifies this file and provides a link to the line where it imports from `iso.ts`, which is one half of the circular dependency."
+        }
+      ],
+      "actualFiles": [
+        "packages/treeshake/tests/no-circular-imports.test.ts",
+        "packages/treeshake/vitest.config.ts",
+        "packages/zod/src/v4/classic/iso.ts",
+        "packages/zod/src/v4/classic/schemas.ts",
+        "packages/zod/src/v4/classic/tests/no-circular-imports.test.ts"
+      ],
+      "matchedFiles": [
+        "packages/zod/src/v4/classic/schemas.ts"
+      ],
+      "missedFiles": [
+        "packages/treeshake/tests/no-circular-imports.test.ts",
+        "packages/treeshake/vitest.config.ts",
+        "packages/zod/src/v4/classic/iso.ts",
+        "packages/zod/src/v4/classic/tests/no-circular-imports.test.ts"
+      ],
+      "extraFiles": [],
+      "precision": 1,
+      "recall": 0.2,
+      "f1": 0.3333,
+      "recallAt5": 0.2,
+      "recallAt10": 0.2,
+      "recallAt20": 0.2,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/treeshake/tests/no-circular-imports.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "packages/treeshake/vitest.config.ts",
+          "category": "config"
+        },
+        {
+          "filePath": "packages/zod/src/v4/classic/iso.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/zod/src/v4/classic/tests/no-circular-imports.test.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 25512,
+      "timestamp": "2026-06-07T17:33:56.494Z"
+    },
+    {
+      "entry": {
+        "id": "trpc-1",
+        "owner": "trpc",
+        "repo": "trpc",
+        "size": "medium",
+        "issueNumber": 7369,
+        "prNumber": 7370,
+        "description": "bug(tanstack-react-query): mutationOptions doesn't contain keyPrefix",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "bug(tanstack-react-query): mutationOptions doesn't contain keyPrefix",
+      "issueUrl": "https://github.com/trpc/trpc/issues/7369",
+      "predictedFiles": [
+        {
+          "fileId": "packages/tanstack-react-query/src/createTRPCOptionsProxy.ts",
+          "confidence": 100,
+          "reason": "Based on the bug report, the issue lies within the `createTRPCOptionsProxy` function. The `mutationOptions` helper method is not prepending the `keyPrefix` to the `mutationKey`, while the `mutationKey` helper method does. This points to an inconsistent implementation within the proxy creation logic for mutations, which is defined in this file."
+        }
+      ],
+      "actualFiles": [
+        "packages/tanstack-react-query/src/internals/createOptionsProxy.ts",
+        "packages/tanstack-react-query/src/internals/mutationOptions.ts",
+        "packages/tanstack-react-query/test/mutationOptions.test.tsx"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/tanstack-react-query/src/internals/createOptionsProxy.ts",
+        "packages/tanstack-react-query/src/internals/mutationOptions.ts",
+        "packages/tanstack-react-query/test/mutationOptions.test.tsx"
+      ],
+      "extraFiles": [
+        "packages/tanstack-react-query/src/createTRPCOptionsProxy.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/tanstack-react-query/src/internals/createOptionsProxy.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/tanstack-react-query/src/internals/mutationOptions.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/tanstack-react-query/test/mutationOptions.test.tsx",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 60393,
+      "timestamp": "2026-06-07T17:34:24.012Z"
+    },
+    {
+      "entry": {
+        "id": "trpc-2",
+        "owner": "trpc",
+        "repo": "trpc",
+        "size": "medium",
+        "issueNumber": 7335,
+        "prNumber": 7336,
+        "description": "bug(server): handle React 19 proxy coercion in createInnerProxy",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "bug(server): handle React 19 proxy coercion in createInnerProxy",
+      "issueUrl": "https://github.com/trpc/trpc/issues/7335",
+      "predictedFiles": [
+        {
+          "fileId": "packages/server/src/core/internals/utils.ts",
+          "confidence": 80,
+          "reason": "This file is not provided, but based on the tRPC project structure, it is the most likely location for the `createInnerProxy` utility function mentioned in the issue. This function is the root cause, as it creates a proxy without handling coercion keys like `valueOf`, `toString`, or `toJSON`, leading to errors when introspected by React 19."
+        },
+        {
+          "fileId": "examples/.experimental/next-app-dir/src/app/server-action/UseActionExample.tsx",
+          "confidence": 100,
+          "reason": "This file demonstrates the bug's impact by calling `JSON.stringify(mutation, null, 4)`. This attempts to serialize the `mutation` object from `useAction`, which triggers the `toJSON` method and exposes the proxy coercion issue, causing a runtime failure."
+        },
+        {
+          "fileId": "examples/.experimental/next-app-dir/src/app/server-action/ReactHookFormExample.tsx",
+          "confidence": 100,
+          "reason": "This file is affected for the same reason as other examples; it uses `JSON.stringify(mutation, null, 4)`. This call on the `mutation` object from `useAction` triggers the `toJSON` proxy trap, which is unhandled and causes the application to break."
+        },
+        {
+          "fileId": "examples/.experimental/next-app-dir/src/app/server-action/FormWithUseActionExample.tsx",
+          "confidence": 100,
+          "reason": "This component demonstrates the bug by using `JSON.stringify` on the `mutation` object returned by `useAction`. This triggers the unhandled `toJSON` property on the underlying tRPC proxy, leading to the runtime error this bug report describes."
+        }
+      ],
+      "actualFiles": [
+        "packages/server/src/unstable-core-do-not-import/createProxy.test.ts",
+        "packages/server/src/unstable-core-do-not-import/createProxy.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/server/src/unstable-core-do-not-import/createProxy.test.ts",
+        "packages/server/src/unstable-core-do-not-import/createProxy.ts"
+      ],
+      "extraFiles": [
+        "packages/server/src/core/internals/utils.ts",
+        "examples/.experimental/next-app-dir/src/app/server-action/UseActionExample.tsx",
+        "examples/.experimental/next-app-dir/src/app/server-action/ReactHookFormExample.tsx",
+        "examples/.experimental/next-app-dir/src/app/server-action/FormWithUseActionExample.tsx"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/server/src/unstable-core-do-not-import/createProxy.test.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "packages/server/src/unstable-core-do-not-import/createProxy.ts",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 100131,
+      "timestamp": "2026-06-07T17:35:26.415Z"
+    },
+    {
+      "entry": {
+        "id": "trpc-3",
+        "owner": "trpc",
+        "repo": "trpc",
+        "size": "medium",
+        "issueNumber": 7264,
+        "prNumber": 7302,
+        "description": "Accessibility: 42 links without accessible text on trpc.io (WCAG scan)",
+        "tags": [
+          "accessibility"
+        ]
+      },
+      "issueTitle": "Accessibility: 42 links without accessible text on trpc.io (WCAG scan)",
+      "issueUrl": "https://github.com/trpc/trpc/issues/7264",
+      "predictedFiles": [],
+      "actualFiles": [
+        "www/src/components/TwitterWall/index.tsx",
+        "www/src/components/sponsors/SponsorBubbles.jsx"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "www/src/components/TwitterWall/index.tsx",
+        "www/src/components/sponsors/SponsorBubbles.jsx"
+      ],
+      "extraFiles": [],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "www/src/components/TwitterWall/index.tsx",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "www/src/components/sponsors/SponsorBubbles.jsx",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 42513,
+      "timestamp": "2026-06-07T17:37:08.558Z"
+    },
+    {
+      "entry": {
+        "id": "trpc-4",
+        "owner": "trpc",
+        "repo": "trpc",
+        "size": "medium",
+        "issueNumber": 7272,
+        "prNumber": 7280,
+        "description": "bug: tRPC error handling with Node VM",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "bug: tRPC error handling with Node VM",
+      "issueUrl": "https://github.com/trpc/trpc/issues/7272",
+      "predictedFiles": [
+        {
+          "fileId": "packages/client/src/TRPCClientError.ts",
+          "confidence": 90,
+          "reason": "This file defines the client-side error class. It will be instantiated with the malformed error response from the server, which has an empty message, thus propagating the unhelpful error on the client."
+        },
+        {
+          "fileId": "packages/client/src/links/loggerLink.ts",
+          "confidence": 80,
+          "reason": "This link logs client-server communication, including errors. It will log the TRPCClientError which, due to the bug, will have an empty message, making the logs less useful for debugging."
+        },
+        {
+          "fileId": "packages/client/src/links/httpBatchStreamLink.ts",
+          "confidence": 70,
+          "reason": "This link processes the HTTP response from the server. Its error handling path is responsible for taking the malformed JSON error response and creating a TRPCClientError from it."
+        }
+      ],
+      "actualFiles": [
+        "packages/server/src/unstable-core-do-not-import/error/TRPCError.ts",
+        "packages/tests/server/regression/issue-7272-node-vm-error-message.test.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/server/src/unstable-core-do-not-import/error/TRPCError.ts",
+        "packages/tests/server/regression/issue-7272-node-vm-error-message.test.ts"
+      ],
+      "extraFiles": [
+        "packages/client/src/TRPCClientError.ts",
+        "packages/client/src/links/loggerLink.ts",
+        "packages/client/src/links/httpBatchStreamLink.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/server/src/unstable-core-do-not-import/error/TRPCError.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/tests/server/regression/issue-7272-node-vm-error-message.test.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 46445,
+      "timestamp": "2026-06-07T17:37:53.087Z"
+    },
+    {
+      "entry": {
+        "id": "ghost-1",
+        "owner": "TryGhost",
+        "repo": "Ghost",
+        "size": "medium",
+        "issueNumber": 28310,
+        "prNumber": 28358,
+        "description": "Members CSV export should include site name in filename",
+        "tags": [
+          "feature"
+        ]
+      },
+      "issueTitle": "Members CSV export should include site name in filename (consistent with JSON export)",
+      "issueUrl": "https://github.com/TryGhost/Ghost/issues/28310",
+      "predictedFiles": [],
+      "actualFiles": [
+        "apps/posts/src/views/members/components/members-actions.tsx",
+        "apps/posts/src/views/members/members.tsx",
+        "apps/posts/test/unit/views/members/members-actions.test.tsx",
+        "e2e/tests/admin/members/export.test.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "apps/posts/src/views/members/components/members-actions.tsx",
+        "apps/posts/src/views/members/members.tsx",
+        "apps/posts/test/unit/views/members/members-actions.test.tsx",
+        "e2e/tests/admin/members/export.test.ts"
+      ],
+      "extraFiles": [],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "apps/posts/src/views/members/components/members-actions.tsx",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "apps/posts/src/views/members/members.tsx",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "apps/posts/test/unit/views/members/members-actions.test.tsx",
+          "category": "test"
+        },
+        {
+          "filePath": "e2e/tests/admin/members/export.test.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 74659,
+      "timestamp": "2026-06-07T17:38:41.536Z"
+    },
+    {
+      "entry": {
+        "id": "ghost-2",
+        "owner": "TryGhost",
+        "repo": "Ghost",
+        "size": "medium",
+        "issueNumber": 20310,
+        "prNumber": 20401,
+        "description": "Newsletter unsubscribe link not working",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "Added TK support to subtitle",
+      "issueUrl": "https://github.com/TryGhost/Ghost/pull/20310",
+      "predictedFiles": [],
+      "actualFiles": [
+        "ghost/core/core/server/GhostServer.js"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "ghost/core/core/server/GhostServer.js"
+      ],
+      "extraFiles": [],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "ghost/core/core/server/GhostServer.js",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 47726,
+      "timestamp": "2026-06-07T17:39:58.202Z"
+    },
+    {
+      "entry": {
+        "id": "ghost-3",
+        "owner": "TryGhost",
+        "repo": "Ghost",
+        "size": "medium",
+        "issueNumber": 19812,
+        "prNumber": 19897,
+        "description": "Portal signup broken after recent auth changes",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "Released Portal v2.37.5",
+      "issueUrl": "https://github.com/TryGhost/Ghost/pull/19812",
+      "predictedFiles": [
+        {
+          "fileId": "apps/activitypub/src/hooks/use-activity-pub-queries.ts",
+          "confidence": 100,
+          "reason": "The `getSiteUrl` function uses a module-level variable `SITE_URL` for caching. This cache is never invalidated, causing it to return a stale URL if the logged-in user changes. This directly causes the de-synchronization issue mentioned in the ticket."
+        }
+      ],
+      "actualFiles": [
+        "ghost/admin/app/components/dashboard/onboarding-checklist.js",
+        "ghost/admin/app/components/modal-share.js"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "ghost/admin/app/components/dashboard/onboarding-checklist.js",
+        "ghost/admin/app/components/modal-share.js"
+      ],
+      "extraFiles": [
+        "apps/activitypub/src/hooks/use-activity-pub-queries.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "ghost/admin/app/components/dashboard/onboarding-checklist.js",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "ghost/admin/app/components/modal-share.js",
+          "category": "business_logic"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 45534,
+      "timestamp": "2026-06-07T17:40:47.933Z"
+    },
+    {
+      "entry": {
+        "id": "nest-1",
+        "owner": "nestjs",
+        "repo": "nest",
+        "size": "large",
+        "issueNumber": 17016,
+        "prNumber": 17024,
+        "description": "`ClientRedis` send() never errors when connection drops (routingMap not cleared)",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "`ClientRedis` send() never errors when connection drops (routingMap not cleared)",
+      "issueUrl": "https://github.com/nestjs/nest/issues/17016",
+      "predictedFiles": [
+        {
+          "fileId": "packages/microservices/client/client-proxy.ts",
+          "confidence": 95,
+          "reason": "The issue describes a bug in `ClientRedis` where pending requests in a `routingMap` are not cleared on connection loss. `ClientRedis` inherits from `ClientProxy`, and this file contains the base implementation for client proxies, where the `routingMap` and connection management logic are typically defined."
+        }
+      ],
+      "actualFiles": [
+        "packages/microservices/client/client-redis.ts",
+        "packages/microservices/test/client/client-redis.spec.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/microservices/client/client-redis.ts",
+        "packages/microservices/test/client/client-redis.spec.ts"
+      ],
+      "extraFiles": [
+        "packages/microservices/client/client-proxy.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/microservices/client/client-redis.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/microservices/test/client/client-redis.spec.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 21361,
+      "timestamp": "2026-06-07T17:41:35.479Z"
+    },
+    {
+      "entry": {
+        "id": "nest-2",
+        "owner": "nestjs",
+        "repo": "nest",
+        "size": "large",
+        "issueNumber": 17017,
+        "prNumber": 17018,
+        "description": "SSE close listener is registered too late, so disconnects can be missed and list",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "SSE close listener is registered too late, so disconnects can be missed and listeners can leak",
+      "issueUrl": "https://github.com/nestjs/nest/issues/17017",
+      "predictedFiles": [
+        {
+          "fileId": "packages/core/router/router-response-controller.ts",
+          "confidence": 100,
+          "reason": "The issue description explicitly identifies a race condition in the `sse()` method within this file. The problem lies in the order of operations: the `request.on('close', ...)` listener is attached after an `await`, which can lead to missed events or listener leaks, a logic flaw contained entirely within this controller."
+        }
+      ],
+      "actualFiles": [
+        "integration/nest-application/sse/e2e/express.spec.ts",
+        "integration/nest-application/sse/e2e/fastify.spec.ts",
+        "integration/nest-application/sse/e2e/utils.ts",
+        "integration/nest-application/sse/src/app.controller.ts",
+        "packages/core/helpers/handler-metadata-storage.ts",
+        "packages/core/router/router-execution-context.ts",
+        "packages/core/router/router-response-controller.ts",
+        "packages/core/test/router/router-execution-context.spec.ts",
+        "packages/core/test/router/router-response-controller.spec.ts"
+      ],
+      "matchedFiles": [
+        "packages/core/router/router-response-controller.ts"
+      ],
+      "missedFiles": [
+        "integration/nest-application/sse/e2e/express.spec.ts",
+        "integration/nest-application/sse/e2e/fastify.spec.ts",
+        "integration/nest-application/sse/e2e/utils.ts",
+        "integration/nest-application/sse/src/app.controller.ts",
+        "packages/core/helpers/handler-metadata-storage.ts",
+        "packages/core/router/router-execution-context.ts",
+        "packages/core/test/router/router-execution-context.spec.ts",
+        "packages/core/test/router/router-response-controller.spec.ts"
+      ],
+      "extraFiles": [],
+      "precision": 1,
+      "recall": 0.1111,
+      "f1": 0.2,
+      "recallAt5": 0.1111,
+      "recallAt10": 0.1111,
+      "recallAt20": 0.1111,
+      "classifiedMisses": [
+        {
+          "filePath": "integration/nest-application/sse/e2e/express.spec.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "integration/nest-application/sse/e2e/fastify.spec.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "integration/nest-application/sse/e2e/utils.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "integration/nest-application/sse/src/app.controller.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/core/helpers/handler-metadata-storage.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/core/router/router-execution-context.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/core/test/router/router-execution-context.spec.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "packages/core/test/router/router-response-controller.spec.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 25,
+      "usedNewPipeline": true,
+      "durationMs": 28304,
+      "timestamp": "2026-06-07T17:41:58.854Z"
+    },
+    {
+      "entry": {
+        "id": "nest-3",
+        "owner": "nestjs",
+        "repo": "nest",
+        "size": "large",
+        "issueNumber": 17007,
+        "prNumber": 17009,
+        "description": "Request-scoped providers silently treated as singletons after",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "Request-scoped providers silently treated as singletons after",
+      "issueUrl": "https://github.com/nestjs/nest/issues/17007",
+      "predictedFiles": [
+        {
+          "fileId": "packages/core/injector/container.ts",
+          "confidence": 90,
+          "reason": "The issue describes a bug in the \"bootstrap dependency walk\" and dependency resolution logic. As the central component of the dependency injection system, `NestContainer` is responsible for orchestrating this process, making it a highly probable location for the bug and its fix."
+        }
+      ],
+      "actualFiles": [
+        "integration/injector/e2e/injector.spec.ts",
+        "packages/core/injector/instance-wrapper.ts",
+        "packages/core/test/injector/instance-wrapper.spec.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "integration/injector/e2e/injector.spec.ts",
+        "packages/core/injector/instance-wrapper.ts",
+        "packages/core/test/injector/instance-wrapper.spec.ts"
+      ],
+      "extraFiles": [
+        "packages/core/injector/container.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "integration/injector/e2e/injector.spec.ts",
+          "category": "test"
+        },
+        {
+          "filePath": "packages/core/injector/instance-wrapper.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/core/test/injector/instance-wrapper.spec.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 32578,
+      "timestamp": "2026-06-07T17:42:29.165Z"
+    },
+    {
+      "entry": {
+        "id": "nest-4",
+        "owner": "nestjs",
+        "repo": "nest",
+        "size": "large",
+        "issueNumber": 16992,
+        "prNumber": 16997,
+        "description": "useWebSocketAdapter is unreachable from DI: silent no-op when called after init(",
+        "tags": [
+          "bug"
+        ]
+      },
+      "issueTitle": "useWebSocketAdapter is unreachable from DI: silent no-op when called after init(), no path to provide it as a provider",
+      "issueUrl": "https://github.com/nestjs/nest/issues/16992",
+      "predictedFiles": [
+        {
+          "fileId": "packages/core/metadata-scanner.ts",
+          "confidence": 90,
+          "reason": "This file contains the `MetadataScanner`, which is used to discover gateway methods. The issue states that gateways are initialized too early, and this service is a key part of that discovery process which runs before `OnModuleInit`."
+        },
+        {
+          "fileId": "packages/core/discovery/discovery-service.ts",
+          "confidence": 90,
+          "reason": "This file contains the `DiscoveryService`, which is used to find providers like WebSocket gateways. This service is invoked during the `registerModules` lifecycle step, which is central to the timing problem described in the issue."
+        },
+        {
+          "fileId": "integration/discovery/src/webhooks.explorer.ts",
+          "confidence": 70,
+          "reason": "This file's `WebhooksExplorer` demonstrates the exact pattern of using `DiscoveryService` and `MetadataScanner` to find and inspect providers. This illustrates the mechanism that the core framework uses for gateways, which is at the heart of the issue."
+        }
+      ],
+      "actualFiles": [
+        "packages/core/nest-application.ts",
+        "packages/core/test/nest-application.spec.ts"
+      ],
+      "matchedFiles": [],
+      "missedFiles": [
+        "packages/core/nest-application.ts",
+        "packages/core/test/nest-application.spec.ts"
+      ],
+      "extraFiles": [
+        "packages/core/metadata-scanner.ts",
+        "packages/core/discovery/discovery-service.ts",
+        "integration/discovery/src/webhooks.explorer.ts"
+      ],
+      "precision": 0,
+      "recall": 0,
+      "f1": 0,
+      "recallAt5": 0,
+      "recallAt10": 0,
+      "recallAt20": 0,
+      "classifiedMisses": [
+        {
+          "filePath": "packages/core/nest-application.ts",
+          "category": "business_logic"
+        },
+        {
+          "filePath": "packages/core/test/nest-application.spec.ts",
+          "category": "test"
+        }
+      ],
+      "pipelineSource": "ai",
+      "snippetCount": 20,
+      "usedNewPipeline": true,
+      "durationMs": 25498,
+      "timestamp": "2026-06-07T17:43:03.745Z"
+    }
+  ],
+  "failedIssues": []
+}
