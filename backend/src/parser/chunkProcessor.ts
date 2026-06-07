@@ -146,10 +146,10 @@ async function processChunk(
         }
 
         try {
-            // ── File level: imports + exports ─────────────────────────────
             const fileLevelResult = extractFileLevel(
                 sourceFile,
-                decision.relativePath
+                decision.relativePath,
+                repoRoot
             );
 
             // Resolve raw imports → ImportEdges + accurate external list
@@ -158,13 +158,28 @@ async function processChunk(
             const confirmedExternal: string[]    = [];
 
             for (const rawImport of fileLevelResult.rawImports) {
+                // Prefer ts-morph's compiler-resolved path when available.
+                // This handles .js → .ts, .js → .tsx, baseUrl, paths aliases,
+                // and workspace symlinks — all via the TS compiler.
+                if (rawImport.resolvedPath) {
+                    resolvedEdges.push({
+                        source:     decision.relativePath,
+                        target:     rawImport.resolvedPath,
+                        kind:       rawImport.kind,
+                        symbols:    rawImport.symbols,
+                        isTypeOnly: rawImport.isTypeOnly,
+                    });
+                    continue;
+                }
+
+                // Fallback: ImportResolver handles dynamic imports and any
+                // specifiers ts-morph couldn't resolve (missing files, etc.)
                 const resolved = resolver.resolve(
                     rawImport.specifier,
                     decision.absolutePath
                 );
 
                 if (resolved.kind === "internal") {
-                    // Alias or relative import resolved to a real file in the repo
                     resolvedEdges.push({
                         source:     decision.relativePath,
                         target:     resolved.resolvedPath,
@@ -173,10 +188,8 @@ async function processChunk(
                         isTypeOnly: rawImport.isTypeOnly,
                     });
                 } else if (resolved.kind === "external") {
-                    // Confirmed external (npm package, Node builtin)
                     confirmedExternal.push(resolved.packageName);
                 } else if (resolved.kind === "unresolved") {
-                    // Alias matched but no file found — record for debugging
                     unresolvedImports.push(resolved.specifier);
                 }
             }

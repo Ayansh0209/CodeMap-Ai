@@ -35,6 +35,7 @@ export interface RawImport {
     kind: "static" | "dynamic" | "re-export";
     symbols: string[];
     isTypeOnly: boolean;           // true for: import type { Foo } from '...'
+    resolvedPath?: string;         // repo-relative path from ts-morph's TS compiler resolution
 }
 
 // ── Language detection ──────────────────────────────────────────────────────
@@ -74,7 +75,8 @@ function extractImportSymbols(node: Node): string[] {
 
 export function extractFileLevel(
     sourceFile: SourceFile,
-    relativePath: string
+    relativePath: string,
+    repoRoot?: string
 ): FileLevelResult {
     const rawImports: RawImport[] = [];
     const externalImports: string[] = [];
@@ -85,11 +87,27 @@ export function extractFileLevel(
         const specifier = decl.getModuleSpecifierValue();
         const symbols = extractImportSymbols(decl);
 
+        // ts-morph delegates to the TS compiler's module resolution.
+        // This correctly handles .js → .ts, .js → .tsx, baseUrl, paths aliases,
+        // and workspace symlinks — all using the tsconfig.json the Project knows.
+        let resolvedPath: string | undefined;
+        try {
+            const resolved = decl.getModuleSpecifierSourceFile()?.getFilePath();
+            if (resolved && repoRoot) {
+                const rel = path.relative(repoRoot, resolved).replace(/\\/g, "/");
+                // Only keep paths inside the repo — discard node_modules / outside-repo
+                if (!rel.startsWith("..") && !rel.includes("node_modules")) {
+                    resolvedPath = rel;
+                }
+            }
+        } catch { /* resolution failed — leave undefined, downstream fallback handles it */ }
+
         rawImports.push({
             specifier,
             kind: "static",
             symbols,
             isTypeOnly: decl.isTypeOnly(),
+            resolvedPath,
         });
     }
 
@@ -108,11 +126,24 @@ export function extractFileLevel(
 
         if (decl.isNamespaceExport()) symbols.push("*");
 
+        // Same ts-morph resolution as section 1
+        let resolvedPath: string | undefined;
+        try {
+            const resolved = decl.getModuleSpecifierSourceFile()?.getFilePath();
+            if (resolved && repoRoot) {
+                const rel = path.relative(repoRoot, resolved).replace(/\\/g, "/");
+                if (!rel.startsWith("..") && !rel.includes("node_modules")) {
+                    resolvedPath = rel;
+                }
+            }
+        } catch { /* leave undefined */ }
+
         rawImports.push({
             specifier,
             kind: "re-export",
             symbols,
             isTypeOnly: decl.isTypeOnly(),
+            resolvedPath,
         });
     }
 
