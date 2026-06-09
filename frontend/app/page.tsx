@@ -6,6 +6,7 @@ import InputBar from "./components/InputBar";
 import ProgressBar from "./components/ProgressBar";
 import { useJobPolling } from "./hooks/useJobPolling";
 import { submitAnalysis } from "./lib/client";
+import MobileWarning from "./components/MobileWarning";
 
 export default function Home() {
   const router = useRouter();
@@ -21,6 +22,17 @@ export default function Home() {
   } = useJobPolling();
 
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [showWarning, setShowWarning] = useState(false);
+
+  useEffect(() => {
+    const checkWarning = () => {
+      const dismissed = sessionStorage.getItem("codemap_dismissed_warning");
+      if (!dismissed && window.innerWidth < 768) {
+        setShowWarning(true);
+      }
+    };
+    checkWarning();
+  }, []);
 
   const isLoading =
     status === "submitting" ||
@@ -101,6 +113,14 @@ export default function Home() {
 
   return (
     <div className="flex flex-col min-h-screen gradient-bg">
+      {showWarning && (
+        <MobileWarning
+          onContinue={() => {
+            sessionStorage.setItem("codemap_dismissed_warning", "true");
+            setShowWarning(false);
+          }}
+        />
+      )}
       {/* ── Hero / Landing Section ─────────────────────────────────────── */}
       <header className="flex flex-col items-center justify-center px-6 pt-20 pb-12">
         {/* Logo / Brand */}

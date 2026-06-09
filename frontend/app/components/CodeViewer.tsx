@@ -124,7 +124,7 @@ export default function CodeViewer({
         ref={containerRef}
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         className="code-viewer flex-1"
-        style={{ overflowY: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}
+        style={{ overflowY: "auto", overflowX: "auto", scrollbarWidth: "none", msOverflowStyle: "none" }}
       >
         <style dangerouslySetInnerHTML={{ __html: `
           .code-viewer::-webkit-scrollbar { display: none; }

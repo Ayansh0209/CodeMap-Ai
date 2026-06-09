@@ -12,6 +12,7 @@ import DetailsPanel from "../components/DetailsPanel";
 import GraphControls from "../components/GraphControls";
 import SearchPanel from "../components/SearchPanel";
 import { GITHUB_REPO_URL } from "../lib/constants";
+import MobileWarning from "../components/MobileWarning";
 import type {
   FileNodeDTO,
   FunctionNodeDTO,
@@ -25,6 +26,28 @@ import type {
 function RepoPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  const [windowWidth, setWindowWidth] = useState<number>(typeof window !== "undefined" ? window.innerWidth : 1200);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const isTabletOrMobile = windowWidth < 1024;
+
+  const [showWarning, setShowWarning] = useState(false);
+
+  useEffect(() => {
+    const checkWarning = () => {
+      const dismissed = sessionStorage.getItem("codemap_dismissed_warning");
+      if (!dismissed && window.innerWidth < 768) {
+        setShowWarning(true);
+      }
+    };
+    checkWarning();
+  }, []);
 
   // ── Load result from sessionStorage ─────────────────────────────────────────
   const [result, setResult] = useState<StatusResponse | null>(null);
@@ -166,6 +189,13 @@ function RepoPageContent() {
     try { return parseInt(localStorage.getItem("codemap-sidebar-width") || "280", 10); } catch { return 280; }
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Auto-collapse sidebar on smaller screens on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1024) {
+      setSidebarCollapsed(true);
+    }
+  }, []);
 
   const [rightSidebarWidth, setRightSidebarWidth] = useState(() => {
     if (typeof window === "undefined") return 380;
@@ -558,35 +588,51 @@ function RepoPageContent() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ background: "#0d1117" }}>
+      {showWarning && (
+        <MobileWarning
+          onContinue={() => {
+            sessionStorage.setItem("codemap_dismissed_warning", "true");
+            setShowWarning(false);
+          }}
+        />
+      )}
       {/* ── Navbar ──────────────────────────────────────────────────────── */}
       <Navbar owner={owner} repo={repo} onAnalyzeAnother={handleAnalyzeAnother} />
 
       {/* ── Main content ───────────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
         {/* ── Left Sidebar ───────────────────────────────────────────── */}
-        <Sidebar
-          width={sidebarWidth}
-          collapsed={sidebarCollapsed}
-          onWidthChange={setSidebarWidth}
-          onCollapsedChange={setSidebarCollapsed}
-          files={fileGraph.files}
-          edges={fileGraph.importEdges}
-          owner={owner}
-          repo={repo}
-          commitSha={commitSha}
-          issueResult={issueResult}
-          isIssueLoading={isIssueLoading}
-          issueError={issueError}
-          onIssueResult={handleIssueResult}
-          onIssueClear={handleIssueClear}
-          setIssueLoading={setIsIssueLoading}
-          setIssueError={setIssueError}
-          onFileSelect={handleFileClick}
-          onZoomToNode={handleZoomToNode}
-          allFunctions={allFunctions}
-          modules={modules}
-          setModules={setModules}
-        />
+        <div 
+          className={`${
+            isTabletOrMobile 
+              ? "absolute left-0 top-0 bottom-0 z-30 shadow-2xl bg-[#0d1117]" 
+              : "relative"
+          } flex h-full`}
+        >
+          <Sidebar
+            width={sidebarWidth}
+            collapsed={sidebarCollapsed}
+            onWidthChange={setSidebarWidth}
+            onCollapsedChange={setSidebarCollapsed}
+            files={fileGraph.files}
+            edges={fileGraph.importEdges}
+            owner={owner}
+            repo={repo}
+            commitSha={commitSha}
+            issueResult={issueResult}
+            isIssueLoading={isIssueLoading}
+            issueError={issueError}
+            onIssueResult={handleIssueResult}
+            onIssueClear={handleIssueClear}
+            setIssueLoading={setIsIssueLoading}
+            setIssueError={setIssueError}
+            onFileSelect={handleFileClick}
+            onZoomToNode={handleZoomToNode}
+            allFunctions={allFunctions}
+            modules={modules}
+            setModules={setModules}
+          />
+        </div>
 
         {/* ── Center: Graph Canvas ───────────────────────────────────── */}
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -655,7 +701,7 @@ function RepoPageContent() {
                       <p className="text-sm">Click a file, then a function.</p>
                       <button
                         onClick={handleBackToFileGraph}
-                        className="mt-4 px-4 py-2 rounded-lg text-sm"
+                        className="mt-4 px-4 py-2 rounded-lg text-sm cursor-pointer"
                         style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
                       >
                         Back to file graph
@@ -670,34 +716,40 @@ function RepoPageContent() {
 
         {/* ── Right Panel ────────────────────────────────────────────── */}
         <div
-          className="shrink-0 flex overflow-hidden"
+          className={`${
+            isTabletOrMobile 
+              ? "absolute right-0 top-0 bottom-0 z-30 shadow-2xl bg-[#161b22]" 
+              : "shrink-0 flex"
+          } overflow-hidden`}
           style={{
-            width: selectedFile ? `${rightSidebarWidth + 12}px` : "0px",
+            width: selectedFile ? (isTabletOrMobile ? `${Math.min(windowWidth - 40, rightSidebarWidth)}px` : `${rightSidebarWidth + 12}px`) : "0px",
             transition: isRightDragging ? "none" : "width 0.25s cubic-bezier(0.4, 0, 0.2, 1)"
           }}
         >
           {selectedFile && (
             <>
-              <div
-                onMouseDown={handleRightResizeMouseDown}
-                style={{
-                  cursor: "col-resize",
-                  width: "12px",
-                  flexShrink: 0,
-                  display: "flex",
-                  justifyContent: "center",
-                  background: "transparent",
-                  zIndex: 10
-                }}
-                className="hover:bg-blue-500/20 transition-colors group"
-                title="Resize sidebar"
-              >
-                <div className="h-full group-hover:bg-blue-500 transition-colors" style={{ width: "1px", background: "#21262d" }} />
-              </div>
+              {!isTabletOrMobile && (
+                <div
+                  onMouseDown={handleRightResizeMouseDown}
+                  style={{
+                    cursor: "col-resize",
+                    width: "12px",
+                    flexShrink: 0,
+                    display: "flex",
+                    justifyContent: "center",
+                    background: "transparent",
+                    zIndex: 10
+                  }}
+                  className="hover:bg-blue-500/20 transition-colors group"
+                  title="Resize sidebar"
+                >
+                  <div className="h-full group-hover:bg-blue-500 transition-colors" style={{ width: "1px", background: "#21262d" }} />
+                </div>
+              )}
               <div
                 className="shrink-0 overflow-hidden"
                 style={{
-                  width: `${rightSidebarWidth}px`,
+                  width: isTabletOrMobile ? `${Math.min(windowWidth - 40, rightSidebarWidth)}px` : `${rightSidebarWidth}px`,
                 }}
               >
                 <DetailsPanel

@@ -22,21 +22,36 @@ function getClient(): VertexAI | null {
     let project = config.gcp.projectId || process.env.GCP_PROJECT_ID || process.env.GOOGLE_CLOUD_PROJECT;
     const location = config.gcp.location || process.env.GCP_LOCATION || process.env.GOOGLE_CLOUD_LOCATION || "us-central1";
 
-    const apiJsonPath = path.join(process.cwd(), "api.json");
-    const hasApiJson = fs.existsSync(apiJsonPath);
-
     let googleAuthOptions: any = undefined;
-    if (hasApiJson) {
+
+    // Check for direct JSON credentials in environment variable first
+    if (process.env.GCP_SA_KEY) {
         try {
-            const apiConfig = JSON.parse(fs.readFileSync(apiJsonPath, "utf8"));
+            const apiConfig = JSON.parse(process.env.GCP_SA_KEY);
             if (apiConfig.project_id && !project) {
                 project = apiConfig.project_id;
             }
             googleAuthOptions = {
-                keyFilename: apiJsonPath
+                credentials: apiConfig
             };
         } catch (e) {
-            console.error("Failed to parse api.json in architecture router:", e);
+            console.error("Failed to parse GCP_SA_KEY in architecture router:", e);
+        }
+    } else {
+        // Fallback to local api.json
+        const apiJsonPath = path.join(process.cwd(), "api.json");
+        if (fs.existsSync(apiJsonPath)) {
+            try {
+                const apiConfig = JSON.parse(fs.readFileSync(apiJsonPath, "utf8"));
+                if (apiConfig.project_id && !project) {
+                    project = apiConfig.project_id;
+                }
+                googleAuthOptions = {
+                    keyFilename: apiJsonPath
+                };
+            } catch (e) {
+                console.error("Failed to parse api.json in architecture router:", e);
+            }
         }
     }
 

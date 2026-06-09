@@ -145,19 +145,21 @@ export default function SearchPanel({
       <div
         className="fixed top-0 right-0 h-full z-50 flex"
         style={{
-          width: panelWidth,
-          maxWidth: "92vw",
+          width: typeof window !== "undefined" && window.innerWidth < 640 ? "100%" : panelWidth,
+          maxWidth: "100vw",
           transform: isOpen ? "translateX(0)" : "translateX(100%)",
           transition: resizingRef.current ? "none" : "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
           boxShadow: isOpen ? "-8px 0 48px rgba(0,0,0,0.6)" : "none",
         }}
       >
         {/* Resize handle */}
-        <div
-          onMouseDown={onResizeStart}
-          className="w-1 h-full flex-shrink-0 cursor-col-resize hover:bg-blue-500/40 transition-colors"
-          style={{ background: "rgba(48,54,61,0.5)" }}
-        />
+        {typeof window !== "undefined" && window.innerWidth >= 640 && (
+          <div
+            onMouseDown={onResizeStart}
+            className="w-1 h-full flex-shrink-0 cursor-col-resize hover:bg-blue-500/40 transition-colors"
+            style={{ background: "rgba(48,54,61,0.5)" }}
+          />
+        )}
 
         {/* Main panel */}
         <div
