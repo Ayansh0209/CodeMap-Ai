@@ -37,11 +37,8 @@ app.use(errorHandler);
 
 
 const server = app.listen(config.app.port, () => {
-    console.log(`Server running on http://localhost:${config.app.port}`);
-    
     // In single-instance environments (like Render Free Tier), start the worker inside the server process
     if (process.env.RUN_WORKER_IN_SERVER === "true") {
-        console.log("[server] Starting inline BullMQ worker...");
         import("./queue/worker").catch(err => {
             console.error("[server] Failed to start inline worker:", err);
         });

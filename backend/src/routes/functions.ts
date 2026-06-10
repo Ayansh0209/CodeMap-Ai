@@ -130,7 +130,6 @@ router.post("/", async (req, res) => {
         const directCached = await redisConnection.get(directKey);
 
         if (directCached) {
-            console.log(`[functions] cache hit: ${fileId}`);
             return res.json(JSON.parse(directCached));
         }
 
@@ -143,7 +142,6 @@ router.post("/", async (req, res) => {
 
         if (!retrieval) {
             // No RetrievalIndex — old behavior
-            console.log(`[functions] cache miss, no retrieval index: ${fileId}`);
             return res.status(404).json({ error: "not found" });
         }
 
@@ -152,25 +150,17 @@ router.post("/", async (req, res) => {
 
         if (!fileEntry) {
             // File not in retrieval index at all
-            console.log(`[functions] file not in retrieval index: ${fileId}`);
             return res.status(404).json({ error: "not found" });
         }
 
         if (!fileEntry.isBarrel || fileEntry.barrelTargets.length === 0) {
             // Not a barrel — it's just a cache miss for a real file
             // (functions may not have been indexed for this file, e.g. it has no functions)
-            console.log(`[functions] cache miss (non-barrel, no functions): ${fileId}`);
             return res.json({ functions: [], fileId, source: "cache-miss" });
         }
 
         // ── Step 3: Barrel expansion ──────────────────────────────────────────
         // This file is a barrel (re-export only). Redirect to its real targets.
-        console.log(
-            `[functions] barrel detected: ${fileId} → ` +
-            `[${fileEntry.barrelTargets.slice(0, 3).join(", ")}` +
-            `${fileEntry.barrelTargets.length > 3 ? `, +${fileEntry.barrelTargets.length - 3} more` : ""}]`
-        );
-
         const merged = await fetchMergedFunctions(
             fileEntry.barrelTargets,
             owner,
@@ -180,7 +170,6 @@ router.post("/", async (req, res) => {
 
         if (merged.length === 0) {
             // Barrel targets also have no cached functions
-            console.log(`[functions] barrel targets have no cached functions: ${fileId}`);
             return res.json({ functions: [], fileId, isBarrel: true, barrelTargets: fileEntry.barrelTargets });
         }
 

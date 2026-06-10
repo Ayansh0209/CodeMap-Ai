@@ -317,12 +317,5 @@ export function analyzeDeadCode(
 
         if (file.isDeadCode) deadCodeFiles++;
     }
-
-    console.log(
-        `[deadCodeAnalyzer] scored ${fileNodes.length} files — ` +
-        `${deadCodeFiles} dead code files (threshold=${DEAD_CODE_THRESHOLD}), ` +
-        `${totalUnusedExports} unused exports, ${totalOrphanSymbols} orphan symbols`
-    );
-
     return { deadCodeFiles, totalUnusedExports, totalOrphanSymbols };
 }

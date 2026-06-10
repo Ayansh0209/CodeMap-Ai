@@ -186,6 +186,4 @@ export function cleanup(jobId: string): void {
     if (fs.existsSync(tarPath)) {
         fs.unlinkSync(tarPath);
     }
-
-    console.log(`[cleanup] ${jobId} removed from disk`);
 }

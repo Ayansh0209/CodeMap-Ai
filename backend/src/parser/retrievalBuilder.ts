@@ -134,8 +134,6 @@ export function buildRetrievalIndex(
     allFunctions: FunctionNode[],
 ): RetrievalIndex {
     const repoId = `${owner}/${repo}`;
-    console.log(`[retrievalBuilder] building retrieval index for ${repoId}`);
-
     // ── Build lookup structures ───────────────────────────────────────────────
     const importedByMap = buildImportedByMap(importEdges);
     const importsMap = buildImportsMap(importEdges);
@@ -207,15 +205,6 @@ export function buildRetrievalIndex(
         (sum, f) => sum + f.functions.filter(fn => fn.hasDatabaseCall).length, 0
     );
     const barrelCount = files.filter(f => f.isBarrel).length;
-
-    console.log(
-        `[retrievalBuilder] built retrieval index: ` +
-        `${files.length} files, ` +
-        `${barrelCount} barrels, ` +
-        `${authCount} auth-check functions, ` +
-        `${dbCount} db-call functions`
-    );
-
     return {
         repoId,
         commitSha,

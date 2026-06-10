@@ -130,10 +130,6 @@ function logUsage(operation: string, usage: any, prompt: string, response: strin
     if (!usage) return;
     const { promptTokenCount, candidatesTokenCount } = usage;
     const cost = (promptTokenCount * 0.000000075) + (candidatesTokenCount * 0.0000003);
-    console.log(`\n\x1b[1;31m[AI FULL LOG - ${operation.toUpperCase()}]\x1b[0m`);
-    console.log(`\x1b[31m--- PROMPT ---\x1b[0m\n\x1b[33m${prompt}\x1b[0m`);
-    console.log(`\x1b[31m--- RESPONSE ---\x1b[0m\n\x1b[32m${response}\x1b[0m`);
-    console.log(`\x1b[1;31m[COST] $${cost.toFixed(6)}\x1b[0m\n`);
 }
 
 // ── Snippet formatter ─────────────────────────────────────────────────────────
@@ -240,8 +236,6 @@ IMPORTANT:
         const files = (parsed.requestedFiles ?? [])
             .filter((f: unknown): f is string => typeof f === "string")
             .slice(0, 15);
-
-        console.log(`\x1b[34m[issueAnalyzer] Gemini graph navigation returned ${files.length} files\x1b[0m`);
         return files;
     } catch (err) {
         console.error("\x1b[31m[issueAnalyzer] Graph navigation failed:\x1b[0m", err);

@@ -162,11 +162,6 @@ export async function fetchLinkedPRs(
                 continue;
             }
         }
-
-        console.log(
-            `[issueClient] found ${prs.length} linked PRs for #${issueNumber} via timeline`
-        );
-
         return prs;
     } catch {
         return [];
@@ -188,13 +183,11 @@ export async function fetchRawFile(
         });
         
         if (!response.ok) {
-            console.log(`[issueClient] Failed to fetch ${fileId}: ${response.statusText}`);
             return "";
         }
         
         const content = await response.text();
         const lines = content.split("\n").length;
-        console.log(`[issueClient] fetched ${fileId} — ${lines} lines`);
         return content;
     } catch (err) {
         console.error(`[issueClient] Error fetching ${fileId}:`, err);

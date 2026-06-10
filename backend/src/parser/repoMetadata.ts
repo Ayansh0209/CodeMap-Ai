@@ -199,18 +199,6 @@ export function extractRepoMetadata(
     const envFiles   = detectEnvFiles(repoRoot);
     const dockerFiles = detectDockerFiles(repoRoot);
     const architectureZones = detectArchitectureZones(repoRoot);
-
-    console.log(
-        `[repoMetadata] extracted — ` +
-        `packages: ${packages.length}, ` +
-        `scripts: ${Object.keys(scripts).length}, ` +
-        `ci: [${ciSystems.join(", ")}], ` +
-        `build: [${buildTools.join(", ")}], ` +
-        `docker: ${dockerFiles.length} files, ` +
-        `env: ${envFiles.length} files, ` +
-        `zones: ${architectureZones.length}`
-    );
-
     return {
         packages,
         scripts,

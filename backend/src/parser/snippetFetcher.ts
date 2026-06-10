@@ -207,7 +207,6 @@ async function fetchRawFileCached(
     try {
         const cached = await redisConnection.get(cacheKey);
         if (cached) {
-            console.log(`\x1b[36m[snippetFetcher] cache hit: ${fileId}\x1b[0m`);
             return cached;
         }
     } catch {
@@ -297,7 +296,6 @@ export async function fetchSnippets(
 
 
         if (fileEntry?.isBarrel === true) {
-            console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — barrel (isBarrel=true)\x1b[0m`);
             continue;
         }
 
@@ -314,7 +312,6 @@ export async function fetchSnippets(
             && fileEntry.imports.length > 0;
 
         if (looksLikeBarrel) {
-            console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — structural barrel (0 fns, 0 structs, has imports)\x1b[0m`);
             continue;
         }
 
@@ -326,22 +323,18 @@ export async function fetchSnippets(
                 // CASE A — Structure-only file (types, interfaces, enums, consts)
                 if (candidate.source === "pr") {
                     // PR-linked structure file: keep a tiny preview (first 40-80 lines)
-                    console.log(`\x1b[33m[snippetFetcher] structure-only PR file — partial fetch ${candidate.fileId}\x1b[0m`);
                     selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "structure-pr-partial" });
                 } else {
                     // Non-PR structure-only: drop entirely
-                    console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — structure-only file (${structCount} structures)\x1b[0m`);
                 }
             } else {
                 // CASE B — True zero-content file (no functions, no structures)
                 if (candidate.source === "pr") {
                     // PR-sourced: keep partial preview
-                    console.log(`\x1b[33m[snippetFetcher] partial PR fallback fetch ${candidate.fileId}\x1b[0m`);
                     selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "zero-pr-partial" });
                 } else {
                     // Non-PR zero-content: drop if large, keep partial if small
                     // lineCount is not on RetrievalFileEntry — estimate from structures
-                    console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — empty file (0 functions, 0 structures)\x1b[0m`);
                 }
             }
             continue;
@@ -443,11 +436,5 @@ export async function fetchSnippets(
             });
         }
     }
-
-    console.log(
-        `\x1b[32m[snippetFetcher] selected ${snippets.length} snippets from ` +
-        `${selectedFiles.length}/${candidates.length} candidate files\x1b[0m`
-    );
-
     return snippets;
 }

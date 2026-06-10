@@ -56,7 +56,6 @@ function RepoPageContent() {
   useEffect(() => {
     const stored = sessionStorage.getItem('codemap_graph');
     if (!stored) {
-      console.log('[repo] no graph data in sessionStorage, redirecting');
       router.replace('/');
       return;
     }
@@ -75,8 +74,6 @@ function RepoPageContent() {
         ...graphData,
         _functionFiles: functionFiles
       });
-
-      console.log('[repo] loaded graph from sessionStorage:', graphData._inlineFileGraph?.files?.length, 'files');
     } catch (err) {
       console.error('[repo] Failed to parse stored graph data:', err);
       router.replace('/');
@@ -87,7 +84,6 @@ function RepoPageContent() {
   // Redirect if no data
   useEffect(() => {
     if (loaded && !result?._inlineFileGraph) {
-      console.log('[page] redirecting to landing, reason:', 'missing _inlineFileGraph in result', { loaded, hasResult: !!result });
       router.replace("/");
     }
   }, [loaded, result, router]);

@@ -92,11 +92,9 @@ export async function loadRetrievalIndex(owner: string, repo: string): Promise<R
         const key = `retrieval:${owner}:${repo}`;
         const raw = await redisConnection.get(key);
         if (!raw) {
-            console.log(`\x1b[33m[issuePipeline] no retrieval index in Redis for ${owner}/${repo} — using legacy\x1b[0m`);
             return null;
         }
         const index = JSON.parse(raw) as RetrievalIndex;
-        console.log(`\x1b[32m[issuePipeline] loaded retrieval index: ${index.files.length} files\x1b[0m`);
         return index;
     } catch (err) {
         console.warn("\x1b[31m[issuePipeline] failed to load retrieval index:\x1b[0m", (err as Error).message);
@@ -132,7 +130,6 @@ async function runStage3(
             input.repo,
             input.commitSha,
         );
-        console.log(`\x1b[32m[issuePipeline] Round 1: fetched ${snippets.length} snippets\x1b[0m`);
     } catch (err) {
         console.warn("\x1b[31m[issuePipeline] Round 1 snippet fetching failed:\x1b[0m", (err as Error).message);
     }
@@ -140,7 +137,6 @@ async function runStage3(
     const round1 = await callGeminiForMappingRound1(input.issue, snippets, input.linkedPRs);
 
     if (!round1) {
-        console.log("\x1b[31m[issuePipeline] Round 1 Gemini call returned null\x1b[0m");
         return { geminiResult: null, snippetCount: snippets.length };
     }
 
@@ -148,9 +144,7 @@ async function runStage3(
     if (!round1.needsMoreContext) {
         // Gemini gave a final answer in Round 1
         if (round1.affectedFiles.length > 0) {
-            console.log(`\x1b[35m[issuePipeline] Round 1 FINAL — AI returned ${round1.affectedFiles.length} files:\n${round1.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
         } else {
-            console.log("\x1b[31m[issuePipeline] Round 1 FINAL — AI returned 0 files\x1b[0m");
         }
         return {
             geminiResult: {
@@ -163,12 +157,6 @@ async function runStage3(
     }
 
     // ── Round 2: Gemini requested more files ──────────────────────────────────
-    console.log(
-        `\x1b[33m[issuePipeline] Round 2 triggered — Gemini wants ${round1.requestedFiles.length} more files: ` +
-        `${round1.reason}\x1b[0m`
-    );
-    console.log(`\x1b[36m[issuePipeline] Requested files:\n${round1.requestedFiles.map(f => `  - ${f}`).join("\n")}\x1b[0m`);
-
     // Build candidates from Gemini's requested file list
     const round2Candidates: CandidateFileEntry[] = round1.requestedFiles
         .filter(fileId => input.graphFileIds.has(fileId)) // only files we know about
@@ -184,7 +172,6 @@ async function runStage3(
             input.repo,
             input.commitSha,
         );
-        console.log(`\x1b[32m[issuePipeline] Round 2: fetched ${round2Snippets.length} additional snippets\x1b[0m`);
     } catch (err) {
         console.warn("\x1b[31m[issuePipeline] Round 2 snippet fetching failed:\x1b[0m", (err as Error).message);
     }
@@ -197,14 +184,12 @@ async function runStage3(
 
     let geminiResult = finalResult;
     if (!geminiResult || geminiResult.affectedFiles.length === 0) {
-        console.log("\x1b[33m[issuePipeline] Round 2 failed or returned 0 files. Falling back to Round 1 results.\x1b[0m");
         geminiResult = {
             affectedFiles: round1.affectedFiles,
             summary: round1.summary,
             fixApproach: round1.fixApproach,
         };
     } else {
-        console.log(`\x1b[35m[issuePipeline] Round 2 FINAL — AI returned ${geminiResult.affectedFiles.length} files:\n${geminiResult.affectedFiles.map(f => `  - ${f.fileId} (confidence: ${f.confidence})`).join("\n")}\x1b[0m`);
     }
 
     return { geminiResult, snippetCount: totalSnippets };
@@ -218,8 +203,6 @@ async function runStage3(
 async function runLegacyPipeline(
     input: PipelineInput,
 ): Promise<{ geminiResult: GeminiMappingResult | null; snippetCount: number }> {
-    console.log("\x1b[33m[issuePipeline] using legacy pipeline (no retrieval index)\x1b[0m");
-
     const geminiResult = await callGeminiForMapping(
         input.issue,
         [],
@@ -249,13 +232,6 @@ export async function runIssueMappingPipeline(
     // ── Stage 1: Token extraction + graph traversal ───────────────────────────
     const commentBodies = input.issue.comments.map(c => c.body);
     const intent = extractSearchIntent(input.issue.title, input.issue.body, commentBodies);
-
-    console.log(
-        `\x1b[32m[issuePipeline] STAGE 1 — intent extracted: ` +
-        `entities=[${intent.entities.slice(0, 8).join(", ")}], ` +
-        `isVague=${intent.isVague}\x1b[0m`
-    );
-
     // Load RetrievalIndex
     const retrieval = await loadRetrievalIndex(input.owner, input.repo);
 
@@ -275,7 +251,6 @@ export async function runIssueMappingPipeline(
     let stage1Candidates: CandidateSet;
     try {
         stage1Candidates = traverseGraph(intent, retrieval, input.linkedPRs, input.graphFileIds);
-        console.log(`\x1b[34m[issuePipeline] STAGE 1 — found ${stage1Candidates.files.length} candidates\x1b[0m`);
     } catch (err) {
         console.warn("\x1b[31m[issuePipeline] STAGE 1 graph traversal failed:\x1b[0m", (err as Error).message);
         // Fall back to legacy
@@ -297,16 +272,13 @@ export async function runIssueMappingPipeline(
 
     let stage2RequestedFiles: string[] = [];
     if (needsStage2) {
-        console.log(`\x1b[33m[issuePipeline] STAGE 2 triggered — candidates=${stage1Candidates.files.length}, isVague=${intent.isVague}\x1b[0m`);
         try {
             const graphMap = buildCompactGraphMap(retrieval);
             stage2RequestedFiles = await callGeminiForGraphNavigation(input.issue, graphMap);
-            console.log(`\x1b[34m[issuePipeline] STAGE 2 — Gemini returned ${stage2RequestedFiles.length} files\x1b[0m`);
         } catch (err) {
             console.warn("\x1b[31m[issuePipeline] STAGE 2 failed:\x1b[0m", (err as Error).message);
         }
     } else {
-        console.log(`\x1b[32m[issuePipeline] STAGE 1 sufficient and specific — skipping Stage 2\x1b[0m`);
     }
 
     // Merge and deduplicate candidates based on source priority: pr > keyword > barrel-expansion > neighborhood > gemini-directed
@@ -344,12 +316,8 @@ export async function runIssueMappingPipeline(
     }
 
     const mergedCandidates = Array.from(mergedMap.values());
-    console.log(`\x1b[32m[issuePipeline] Merged and deduplicated to ${mergedCandidates.length} candidate files\x1b[0m`);
-    console.log(`\x1b[36m[issuePipeline] FINAL MERGED CANDIDATES:\n${mergedCandidates.map(c => `  - [${c.source}] ${c.fileId}`).join("\n")}\x1b[0m`);
-
     // ── Stage 3: Iterative Gemini mapping ─────────────────────────────────────
     if (mergedCandidates.length === 0) {
-        console.log("\x1b[31m[issuePipeline] no candidates after Stage 1 + 2 — returning empty\x1b[0m");
         return {
             geminiResult: null,
             usedNewPipeline: true,
@@ -361,7 +329,6 @@ export async function runIssueMappingPipeline(
     }
 
     try {
-        console.log(`\x1b[34m[issuePipeline] STAGE 3 — starting iterative mapping with ${mergedCandidates.length} candidates\x1b[0m`);
         const { geminiResult, snippetCount } = await runStage3(
             mergedCandidates, retrieval, intent, input
         );

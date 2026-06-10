@@ -284,7 +284,6 @@ export class AliasResolver {
         }
 
         if (entries.length > 0) {
-            console.log(`[aliasResolver] loaded ${entries.length} alias entries from ${configPath}`);
         }
 
         return entries;
@@ -483,23 +482,12 @@ export class AliasResolver {
         const aliasCount  = this.aliases.filter((a) => a.prefix !== "").length;
         const hasBaseUrl  = this.aliases.some((a) => a.prefix === "");
         const wsPkgCount  = this.workspacePkgs.size;
-
-        console.log(
-            `[aliasResolver] loaded — ` +
-            `aliases: ${aliasCount}, ` +
-            `baseUrl: ${hasBaseUrl}, ` +
-            `workspace pkgs: ${wsPkgCount}, ` +
-            `self: ${this.selfPackage ?? "none"}, ` +
-            `framework fallbacks: ${!this.hasConfigAlias}`
-        );
-
         if (aliasCount > 0) {
             const preview = this.aliases
                 .filter((a) => a.prefix !== "")
                 .slice(0, 8)
                 .map((a) => `"${a.prefix}${a.isWildcard ? "*" : ""}"`)
                 .join(", ");
-            console.log(`[aliasResolver] alias prefixes: ${preview}`);
         }
     }
 }

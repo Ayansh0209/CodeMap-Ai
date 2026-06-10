@@ -203,12 +203,6 @@ router.post("/map", async (req: Request, res: Response, next: NextFunction) => {
         // Comments and linked PRs: failures are non-fatal — pass empty arrays.
         const comments  = await fetchIssueComments(owner, repo, issueNumber, 20).catch(() => []);
         const linkedPRs = await fetchLinkedPRs(owner, repo, issueNumber).catch(() => []);
-
-        console.log(
-            `[issueMap] fetched issue #${issueNumber}: "${issue.title}" ` +
-            `(${comments.length} comments, ${linkedPRs.length} linked PRs)`
-        );
-
         // ── Step 3.5: Resolve graph data ──────────────────────────────────────
         // graphData comes from the request body (frontend sends it inline),
         // OR from Redis (when the frontend doesn't include it).
@@ -227,9 +221,6 @@ router.post("/map", async (req: Request, res: Response, next: NextFunction) => {
                         })),
                         functions: [],
                     };
-                    console.log(
-                        `[issueMap] graph data recovered from Redis (${resolvedGraphData.files.length} files)`
-                    );
                 }
             } catch {
                 // Redis down — resolvedGraphData stays null
@@ -291,16 +282,8 @@ router.post("/map", async (req: Request, res: Response, next: NextFunction) => {
             affectedFiles = geminiResult.affectedFiles;
             source        = "ai";
             summary       = geminiResult.summary;
-            console.log(
-                `[issueMap] mapping succeeded — ${affectedFiles.length} files, ` +
-                `${snippetCount} snippets, new_pipeline=${usedNewPipeline}`
-            );
         } else {
             affectedFiles = [];
-            console.log(
-                `\x1b[31m[issueMap] pipeline returned no AI result — 0 files found. ` +
-                `new_pipeline=${usedNewPipeline}, snippets=${snippetCount}\x1b[0m`
-            );
         }
 
         const overallConfidence = affectedFiles.length > 0
