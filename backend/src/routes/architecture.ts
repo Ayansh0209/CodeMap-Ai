@@ -127,7 +127,6 @@ router.post("/", async (req: Request, res: Response, next: NextFunction) => {
         // 1. Check Redis Cache
         const cached = await redisConnection.get(cacheKey);
         if (cached) {
-            console.log(`[architecture] Cache hit for ${owner}/${repo}@${commitSha.slice(0, 7)}`);
             // Cache hit debug update
             const debugKey = `architecture:debug:v1:${modelName}:${owner}:${repo}:${commitSha}`;
             const cachedDebug = await redisConnection.get(debugKey);
@@ -335,34 +334,7 @@ Response Schema:
         ) {
           console.error("TOKEN ACCOUNTING ERROR");
         }
-
-        console.log({
-          promptTokens: usage?.promptTokenCount,
-          outputTokens: usage?.candidatesTokenCount,
-          model: modelName,
-          inputPriceUsed: INPUT_PRICE,
-          outputPriceUsed: OUTPUT_PRICE,
-        });
-
-        console.log("\n=== GEMINI COST DEBUG ===");
-        console.log("Model:", modelName);
-
-        console.log("Usage Metadata:");
         console.dir(resObj.usageMetadata, { depth: null });
-
-        console.log("Prompt Tokens:", resObj.usageMetadata?.promptTokenCount);
-        console.log("Candidates Tokens:", resObj.usageMetadata?.candidatesTokenCount);
-        console.log("Total Tokens:", resObj.usageMetadata?.totalTokenCount);
-
-        console.log("Calculated Cost:", calculatedCost);
-
-        console.log("Prompt Size (chars):", prompt.length);
-
-        console.log("First 500 chars of prompt:");
-        console.log(prompt.slice(0, 500));
-
-        console.log("=== END COST DEBUG ===\n");
-
         const totalTime = Date.now() - totalRequestStart;
         const generationTime = geminiEnd - geminiStart;
         const postProcessingTime = Date.now() - geminiEnd;
@@ -382,16 +354,6 @@ Response Schema:
 
         const debugKey = `architecture:debug:v1:${modelName}:${owner}:${repo}:${commitSha}`;
         await redisConnection.set(debugKey, JSON.stringify(debugMetrics));
-
-        console.log(`\n\x1b[1;36m[ARCHITECTURE GENERATED]\x1b[0m`);
-        console.log(`Repository: ${owner}/${repo} @ ${commitSha.slice(0, 7)}`);
-        console.log(`Cache: Miss`);
-        console.log(`Files Grouped: ${fileGraph.files.length}`);
-        console.log(`Clusters: ${modules.length}`);
-        console.log(`Tokens: Prompt: ${promptTokens} | Response: ${responseTokens} | Total: ${totalTokens}`);
-        console.log(`Cost: ${estimatedCost}`);
-        console.log(`Timings: AI: ${generationTime}ms | Post: ${postProcessingTime}ms | Total: ${totalTime}ms\n`);
-
         return res.json(finalResponse);
 
     } catch (err) {

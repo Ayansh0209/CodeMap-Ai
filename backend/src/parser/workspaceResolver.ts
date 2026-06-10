@@ -241,15 +241,7 @@ export function detectWorkspaces(repoRoot: string): WorkspaceInfo {
     const isMonorepo = packages.length > 1;
 
     if (packages.length > 0) {
-        console.log(
-            `[workspaceResolver] detected ${packages.length} workspace packages ` +
-            `(tool: ${tool}, monorepo: ${isMonorepo})`
-        );
         for (const pkg of packages.slice(0, 10)) {
-            console.log(
-                `  ${pkg.name} @ ${pkg.root} ` +
-                `(deps: ${pkg.dependencies.join(", ") || "none"})`
-            );
         }
     }
 

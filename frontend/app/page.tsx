@@ -43,9 +43,6 @@ export default function Home() {
   // ── Navigate to /repo on completion ─────────────────────────────────────────
   useEffect(() => {
     if (status === "done") {
-      console.log('[page] job done, navigating to graph');
-      console.log('[page] fileGraph files:', result?._inlineFileGraph?.files?.length);
-
       if (result?._inlineFileGraph) {
         try {
           const graphPayload = {
@@ -61,14 +58,11 @@ export default function Home() {
 
           const functionsJson = JSON.stringify(result._functionFiles ?? {});
           const functionsSizeMB = (functionsJson.length / 1024 / 1024).toFixed(1);
-          console.log('[page] functions data size:', functionsSizeMB, 'MB');
-
           try {
             sessionStorage.setItem('codemap_graph', JSON.stringify(graphPayload));
             if (parseFloat(functionsSizeMB) < 4) {
               sessionStorage.setItem('codemap_functions', functionsJson);
             } else {
-              console.log('[page] functions too large for sessionStorage, will fetch per-file');
               sessionStorage.removeItem('codemap_functions');
             }
           } catch (storageErr) {
@@ -84,7 +78,6 @@ export default function Home() {
         const repo = result.repo || "";
         router.push(`/repo?repo=${owner}/${repo}`);
       } else {
-        console.log('[page] redirecting to landing, reason: no _inlineFileGraph on done status');
       }
     }
   }, [status, result, router]);

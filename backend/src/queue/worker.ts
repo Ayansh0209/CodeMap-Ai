@@ -55,16 +55,12 @@ async function updateProgress(
 ): Promise<void> {
     await job.updateProgress(percent);
     await job.updateData({ ...job.data, currentStep: step });
-    console.log(`[worker] ${job.data.owner}/${job.data.repo} — ${percent}% — ${step}`);
 }
 
 // ── Main processor ─────────────────────────────────────────────────────────────
 
 async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
     const { owner, repo, jobId } = job.data;
-
-    console.log(`[worker] Job received: ${owner}/${repo} (jobId: ${jobId})`);
-
     await updateProgress(job, 0, "starting");
 
     // ── Step 1: Fetch repo metadata ──────────────────────────────────────────
@@ -78,25 +74,15 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
             `Repository too large: ${metadata.sizeMB}MB (limit: 500MB)`
         );
     }
-
-    console.log(
-        `[worker] Metadata OK → branch=${metadata.defaultBranch}, ` +
-        `sha=${metadata.commitSha.slice(0, 7)}, size=${metadata.sizeMB}MB`
-    );
-
     // ── Step 3: Redis cache check by SHA ─────────────────────────────────────
     // Same SHA always produces same graph — never reprocess
     const cacheKey = `repo:${owner}:${repo}:${metadata.commitSha}`;
     const cached = await getCachedResult(cacheKey);
 
     if (cached) {
-        console.log(`[worker] Cache hit for ${owner}/${repo}@${metadata.commitSha.slice(0, 7)}`);
         await updateProgress(job, 100, "done (from cache)");
         return cached;
     }
-
-    console.log(`[worker] Cache miss — starting full analysis`);
-
     // ── Steps 4-8 run inside try/finally so cleanup ALWAYS happens ───────────
     try {
         // ── Step 4: Download tarball (streaming, never loads into RAM) ───────
@@ -113,22 +99,10 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
         await updateProgress(job, 30, "walking file tree");
 
         const allFiles = walkFileTree(jobId);
-
-        console.log(`[worker] Found ${allFiles.length} total files`);
-
         // ── Step 7: Filter + decide parse mode per file ───────────────────────
         await updateProgress(job, 35, "filtering and classifying files");
 
         const { decisions, stats } = decideParsing(allFiles);
-
-        console.log(
-            `[worker] Parse decisions → ` +
-            `full: ${stats.full}, ` +
-            `imports-only: ${stats.importsOnly}, ` +
-            `skipped: ${stats.skipped}, ` +
-            `filtered: ${stats.filtered}`
-        );
-
         // Guard: abort if no parseable files found
         if (stats.full === 0 && stats.importsOnly === 0) {
             throw new Error(
@@ -194,10 +168,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
             );
             const retrievalKey = `retrieval:${owner}:${repo}`;
             await redisConnection.set(retrievalKey, JSON.stringify(retrievalIndex));
-            console.log(
-                `[worker] retrieval index stored in Redis ` +
-                `(${retrievalIndex.files.length} files, key: ${retrievalKey})`
-            );
         } catch (err) {
             console.warn(
                 "[worker] Failed to build or store retrieval index (non-fatal):",
@@ -210,7 +180,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
             try {
                 const searchKey = `search:${owner}:${repo}`;
                 await redisConnection.set(searchKey, JSON.stringify(searchIndex));
-                console.log(`[worker] search index persisted to Redis (${searchIndex.entries.length} entries)`);
             } catch (err) {
                 console.warn("[worker] Failed to persist search index:", (err as Error).message);
             }
@@ -220,7 +189,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
         try {
             const graphKey = `graph:${owner}:${repo}`;
             await redisConnection.set(graphKey, JSON.stringify(fileGraph));
-            console.log(`[worker] file graph persisted to Redis for issue mapper`);
         } catch (err) {
             console.warn("[worker] Failed to persist file graph:", (err as Error).message);
         }
@@ -233,7 +201,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
                 await redisConnection.set(funcKey, JSON.stringify(payload));
                 funcCount++;
             }
-            console.log(`[worker] persisted ${funcCount} per-file functions to Redis`);
         } catch (err) {
             console.warn("[worker] Failed to persist per-file functions:", (err as Error).message);
         }
@@ -243,7 +210,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
         const functionsSizeMB = Buffer.byteLength(functionsJsonStr, 'utf8') / 1024 / 1024;
 
         if (functionsSizeMB > 4) {
-            console.log(`[worker] _functionFiles is ${functionsSizeMB.toFixed(2)}MB (>4MB), omitting from inline result to save memory and avoid OOM. Frontend will lazy load.`);
             functionFilesObj = {};
         }
 
@@ -266,8 +232,6 @@ async function processJob(job: Job<AnalyzeJobData>): Promise<object> {
 
         const resultJson = JSON.stringify(result)
         const resultSizeMB = (Buffer.byteLength(resultJson, 'utf8') / 1024 / 1024).toFixed(2)
-        console.log(`[worker] result size: ${resultSizeMB}MB`)
-
         if (parseFloat(resultSizeMB) > 10) {
             console.warn(`[worker] WARNING: result is ${resultSizeMB}MB — may exceed limits`)
             console.warn(`[worker] _inlineFileGraph files: ${result._inlineFileGraph?.files?.length}`)
@@ -299,26 +263,17 @@ export const analysisWorker = new Worker<AnalyzeJobData>(
 );
 
 analysisWorker.on("active", (job) => {
-    console.log(`[worker] Job active: ${job.id} — ${job.data.owner}/${job.data.repo}`);
 });
 
 analysisWorker.on("completed", (job, result) => {
-    console.log(`[worker] Job completed: ${job.id}`);
-    console.log(`[worker] Stats:`, JSON.stringify((result as any).stats, null, 2));
-
     // ── TEMP DEBUG — remove after verifying graph data ──────────────────────
     const graph = (result as any)._inlineFileGraph;
     if (graph) {
-        console.log(`[worker] Sample import edges (first 3):`);
         graph.importEdges?.slice(0, 3).forEach((e: any) => {
-            console.log(`  ${e.source} → ${e.target} [${e.kind}] isTypeOnly=${e.isTypeOnly}`);
         });
-        console.log(`[worker] Sample files (first 3):`);
         graph.files?.slice(0, 3).forEach((f: any) => {
-            console.log(`  ${f.id} | kind=${f.kind} | entry=${f.isEntryPoint} | lines=${f.lineCount}`);
         });
     } else {
-        console.log(`[worker] No _inlineFileGraph in result — graph may not be wired yet`);
     }
     // ── END TEMP DEBUG ───────────────────────────────────────────────────────
 });
@@ -336,7 +291,6 @@ analysisWorker.on("error", (err) => {
 // Railway sends SIGTERM before killing the container
 
 async function shutdown(): Promise<void> {
-    console.log("[worker] Shutting down gracefully...");
     await analysisWorker.close();
     await redisConnection.quit();
     process.exit(0);
@@ -344,7 +298,3 @@ async function shutdown(): Promise<void> {
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
-
-console.log(
-    `[worker] Started — concurrency: ${config.queue.maxConcurrentJobs}`
-);

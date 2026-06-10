@@ -38,13 +38,6 @@ export function decideParsing(files: FileEntry[]): DecisionSummary {
     const full = decisions.filter((d) => d.mode === "full").length;
     const importsOnly = decisions.filter((d) => d.mode === "imports-only").length;
     const skipped = decisions.filter((d) => d.mode === "skip").length;
-
-    console.log(`[parseDecider] total: ${files.length} files`);
-    console.log(`[parseDecider] filtered out: ${filtered} (not code files)`);
-    console.log(`[parseDecider] full parse: ${full}`);
-    console.log(`[parseDecider] imports only: ${importsOnly}`);
-    console.log(`[parseDecider] skipped: ${skipped}`);
-
     return {
         decisions,
         stats: {

@@ -65,15 +65,8 @@ export async function getJobStatus(jobId: string): Promise<StatusResponse> {
     const err = await res.json().catch(() => ({ error: "Request failed" }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
-
-  console.log('[poll] response size:', res.headers.get('content-length'), 'bytes');
-  console.log('[poll] status:', res.status);
-
   try {
     const data = await res.json();
-    console.log('[poll] parsed result keys:', Object.keys(data));
-    console.log('[poll] _inlineFileGraph files:', data._inlineFileGraph?.files?.length);
-    console.log('[poll] _functionFiles keys:', Object.keys(data._functionFiles ?? {}).length);
     return data;
   } catch (err) {
     console.error('[poll] JSON parse failed:', err);

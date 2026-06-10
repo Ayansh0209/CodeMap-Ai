@@ -255,7 +255,6 @@ function expandGraphByCategory(
         if (graphFileIds.has(neighbor) && !isNoisePath(neighbor)) {
           const evalResult = evaluateCandidate(neighbor);
           if (evalResult.matches) {
-            console.log(`[retrieval:schema-config] Neighbor match: ${neighbor} | Type: ${evalResult.hitType} | Details: ${evalResult.reason}`);
             expandedCandidates.set(neighbor, { fileId: neighbor, score: 85, source: "neighborhood" });
           }
         }
@@ -267,17 +266,11 @@ function expandGraphByCategory(
           if (graphFileIds.has(path) && !isNoisePath(path)) {
             const evalResult = evaluateCandidate(path);
             if (evalResult.matches) {
-              console.log(`[retrieval:schema-config] Global fallback match: ${path} | Type: ${evalResult.hitType} | Details: ${evalResult.reason}`);
               expandedCandidates.set(path, { fileId: path, score: 80, source: "neighborhood" });
             }
           }
         }
       }
-
-      console.log(
-        `[retrieval:schema-config] Category expansion summary for category: "${category}". ` +
-        `Hits summary -> Metadata hits: ${metadataHitCount}, Graph hits: ${graphHitCount}, Fallback hits: ${fallbackHitCount}`
-      );
     }
 
     if (category === "tests") {
@@ -348,7 +341,6 @@ export async function buildChatContext(params: {
     const cached = await redisConnection.get(cacheKey);
     if (cached) {
       const parsed = JSON.parse(cached);
-      console.log(`[chatContextBuilder] Cache hit for key: ${cacheKey}`);
       return {
         systemInstruction: parsed.systemInstruction,
         snippets: parsed.snippets,
@@ -408,7 +400,6 @@ export async function buildChatContext(params: {
 
   if (usefulEntities.length === 0 && (issueTitle || issueBody)) {
     intent = extractSearchIntent(issueTitle, issueBody, []);
-    console.log(`[chatContextBuilder] Chat entities empty/stopwords. Fell back to issue keywords: [${intent.entities.slice(0, 6).join(", ")}]`);
   } else {
     intent.entities = usefulEntities;
   }
@@ -416,7 +407,6 @@ export async function buildChatContext(params: {
   // 4. Load retrieval index
   const retrieval = await loadRetrievalIndex(owner, repo);
   if (!retrieval) {
-    console.log("[chatContextBuilder] No retrieval index found, returning fallback context.");
     return {
       systemInstruction: `You are an expert code reviewer.\nCURRENT FILE: ${currentFileId}\n(No code index available — answer from conversation only)`,
       snippets: [],
@@ -467,12 +457,8 @@ export async function buildChatContext(params: {
 
   // Sort candidates by score descending to rank snippets by retrieval relevance
   candidateSet.files.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  console.log(`[chatContextBuilder] ${candidateSet.files.length} candidates (seeds faked as PR files)`);
-
   // 7. Fetch snippets
   const snippets = await fetchSnippets(candidateSet.files, retrieval, intent, owner, repo, commitSha);
-  console.log(`[chatContextBuilder] ${snippets.length} snippets fetched`);
-
   // Rank snippets by existing retrieval relevance (mapping fileId to candidate's score)
   const candidateScoreMap = new Map<string, number>();
   for (const c of candidateSet.files) {
@@ -491,7 +477,6 @@ export async function buildChatContext(params: {
   let accumulatedChars = 0;
   for (const snippet of rankedSnippets) {
     if (accumulatedChars + snippet.body.length > MAX_SNIPPET_CHARS) {
-      console.log(`[chatContextBuilder] snippet budget exceeded (${accumulatedChars} chars). Dropping lowest relevance snippets.`);
       break;
     }
     finalSnippets.push(snippet);
@@ -501,7 +486,6 @@ export async function buildChatContext(params: {
   // 9. Problem 3 Fallback: If finalSnippets is empty and we have an issue number,
   // fetch the core affected files directly from Redis cache and load them as snippets instead.
   if (finalSnippets.length === 0 && issueNumber && issueMappedFiles.length > 0) {
-    console.log(`[chatContextBuilder] BFS returned 0 snippets. Falling back to issue-map affectedFiles: [${issueMappedFiles.join(", ")}]`);
     const fallbackCandidates = issueMappedFiles.map(fileId => ({
       fileId,
       source: "keyword" as const,
@@ -518,7 +502,6 @@ export async function buildChatContext(params: {
         finalSnippets.push(snippet);
         accumulatedFallbackChars += snippet.body.length;
       }
-      console.log(`[chatContextBuilder] Loaded ${finalSnippets.length} fallback snippets directly from issue-map.`);
     } catch (err) {
       console.warn("[chatContextBuilder] Failed to fetch fallback snippets from issue-map affectedFiles:", err);
     }
@@ -527,15 +510,8 @@ export async function buildChatContext(params: {
   // Iterative Retrieval Review and Expansion
   let finalCandidates = [...candidateSet.files];
   if (config.chat.enableIterativeRetrieval) {
-    console.log(`[IterativeRetrieval] Starting Stage 2 Retrieval Review.`);
-    console.log(`[IterativeRetrieval] Snippets BEFORE expansion count: ${finalSnippets.length}`);
-    console.log(`[IterativeRetrieval] Snippet paths:`, finalSnippets.map(s => s.fileId));
-
     const review = await callGeminiForRetrievalReview(userMessage, finalSnippets, currentFileId);
     if (review) {
-      console.log(`[IterativeRetrieval] Review completed. Confidence: ${review.confidence}, needMoreContext: ${review.needMoreContext}`);
-      console.log(`[IterativeRetrieval] Missing categories requested:`, review.missing);
-
       if (review.needMoreContext && review.missing && review.missing.length > 0) {
         // Stage 3: Graph Expansion
         const seedsForExpansion = finalSnippets.map(s => s.fileId);
@@ -549,12 +525,9 @@ export async function buildChatContext(params: {
         const newCandidates = expandedCandidates.filter(c => !existingFileIds.has(c.fileId));
 
         if (newCandidates.length > 0) {
-          console.log(`[IterativeRetrieval] Found ${newCandidates.length} new candidates during expansion:`, newCandidates.map(c => c.fileId));
           finalCandidates.push(...newCandidates);
 
           const expandedSnippets = await fetchSnippets(newCandidates, retrieval, intent, owner, repo, commitSha);
-          console.log(`[IterativeRetrieval] Fetched ${expandedSnippets.length} new snippets from expansion.`);
-
           const allSnippets = [...finalSnippets, ...expandedSnippets];
           const candidateScoreMap = new Map<string, number>();
           for (const c of finalCandidates) {
@@ -571,16 +544,12 @@ export async function buildChatContext(params: {
           let accumulatedChars = 0;
           for (const snippet of rankedAllSnippets) {
             if (accumulatedChars + snippet.body.length > MAX_SNIPPET_CHARS) {
-              console.log(`[IterativeRetrieval] snippet budget exceeded (${accumulatedChars} chars) during re-budgeting.`);
               break;
             }
             finalSnippets.push(snippet);
             accumulatedChars += snippet.body.length;
           }
-          console.log(`[IterativeRetrieval] Snippets AFTER expansion count: ${finalSnippets.length}`);
-          console.log(`[IterativeRetrieval] Snippet paths:`, finalSnippets.map(s => s.fileId));
         } else {
-          console.log(`[IterativeRetrieval] Graph expansion returned no new candidates.`);
         }
       }
     } else {

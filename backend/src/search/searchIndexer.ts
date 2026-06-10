@@ -161,12 +161,6 @@ export function buildSearchIndex(
             });
         }
     }
-
-    console.log(
-        `[searchIndexer] built index with ${entries.length} entries ` +
-        `(${fileNodes.length} files, ${allFunctions.filter(f => f.isExported).length} exports)`
-    );
-
     return {
         entries,
         generatedAt: new Date().toISOString(),

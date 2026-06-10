@@ -212,7 +212,6 @@ async function processChunk(
             if (decision.mode === "full" && functions.length === 0) {
                 const ext = path.extname(decision.relativePath);
                 if (ext === ".js" || ext === ".jsx") {
-                    console.log(`[chunkProcessor] ⚠ 0 functions in JS file: ${decision.relativePath}`);
                 }
             }
 
@@ -309,19 +308,10 @@ export async function processAllFiles(
     const allFunctions:     FunctionNode[] = [];
     const allStartupSignals = new Map<string, boolean>();
     const allRouteHandlers  = new Map<string, boolean>();
-
-    console.log(
-        `[chunkProcessor] ${filesToParse.length} files to parse in ${chunks.length} chunks`
-    );
-
     let processedCount = 0;
 
     for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
-        console.log(
-            `[chunkProcessor] chunk ${i + 1}/${chunks.length} — ${chunk.length} files`
-        );
-
         const result = await processChunk(chunk, repoRoot, resolver, i);
 
         allFileNodes.push(...result.fileNodes);
@@ -356,14 +346,6 @@ export async function processAllFiles(
             unresolvedImports: [],
         });
     }
-
-    console.log(
-        `[chunkProcessor] done — ` +
-        `${allFileNodes.length} files, ` +
-        `${allImportEdges.length} import edges, ` +
-        `${allFunctions.length} functions`
-    );
-
     return {
         fileNodes:      allFileNodes,
         importEdges:    allImportEdges,

@@ -52,10 +52,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
             startupSignals, routeHandlers, repoRoot } = input;
     const repoId = `${owner}/${repo}`;
     const generatedAt = new Date().toISOString();
-
-    console.log(`[builder] building graph for ${repoId}`);
-    console.log(`[builder] input: ${fileNodes.length} files, ${importEdges.length} import edges, ${allFunctions.length} functions`);
-
     // ── Step 1: Normalise paths + build file ID set ───────────────────────────
     // Windows produces backslashes; normalise everything to forward slashes
     // so comparisons work identically on Windows dev and Linux Railway
@@ -94,7 +90,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
     }
 
     if (orphanCount > 0) {
-        console.log(`[builder] dropped ${orphanCount} orphan import edges (target file not in graph)`);
     }
 
 
@@ -110,8 +105,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
 
     // ── Step 2.7: Graph Analytics (SCC & Weighting) ─────────────────────────
     const analyticsStats = applyGraphAnalytics(fileNodes, validImportEdges);
-    console.log(`[builder] graph analytics: found ${analyticsStats.cycleCount} circular dependency cycles containing ${analyticsStats.filesInCycles} files`);
-
     // ── Step 2.8: Compute scores on each FileNode ────────────────────────────
     const inDegree = new Map<string, number>();
     const outDegree = new Map<string, number>();
@@ -148,11 +141,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
     const top5 = [...fileNodes]
         .sort((a, b) => (b.architecturalImportance ?? 0) - (a.architecturalImportance ?? 0))
         .slice(0, 5);
-
-    console.log("[builder] top 5 by architectural importance:");
-    top5.forEach(f =>
-        console.log(`  ${f.id} — importance: ${f.architecturalImportance} hub: ${f.hubScore} entry: ${f.isEntryPoint}`)
-    );
 
     // ── Step 2.9: Workspace / Monorepo Resolution ────────────────────────────
     const workspaceInfo = repoRoot ? detectWorkspaces(repoRoot) : undefined;
@@ -236,9 +224,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
         seenCallEdges.add(key);
         uniqueCallEdges.push(edge);
     }
-
-    console.log(`[builder] resolved ${uniqueCallEdges.length} call edges`);
-
     // ── Step 5: Apply calledBy back onto FunctionNodes ────────────────────────
     // build a map for fast lookup
     const functionMap = new Map<string, FunctionNode>();
@@ -321,14 +306,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
     if (selfCallCount > 0) {
         console.warn(`[builder] warning: ${selfCallCount} self-call edges detected`);
     }
-
-    console.log(`[builder] graph built:`);
-    console.log(`[builder]   files: ${graphData.stats.totalFiles}`);
-    console.log(`[builder]   parsed: ${graphData.stats.parsedFiles}`);
-    console.log(`[builder]   functions: ${graphData.stats.totalFunctions}`);
-    console.log(`[builder]   import edges: ${graphData.stats.totalImportEdges}`);
-    console.log(`[builder]   call edges: ${graphData.stats.totalCallEdges}`);
-
     // ── Step 9: Split into file_graph + per-file function payloads ────────────
 
     // file_graph.json — loaded first by frontend, kept small
@@ -364,9 +341,6 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
             callEdges: fileCallEdges,
         });
     }
-
-    console.log(`[builder] split into 1 file_graph + ${functionFiles.size} function files`);
-
     // ── Step 10: Build search index ────────────────────────────────────────────
     const searchIndex = buildSearchIndex(fileNodes, allFunctions, validImportEdges);
 
