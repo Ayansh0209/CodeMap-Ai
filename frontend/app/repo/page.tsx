@@ -58,7 +58,12 @@ function RepoPageContent() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    const repoParam = searchParams.get("repo") ?? "";
+    // Read the repo param ONCE at mount from window.location.
+    // IMPORTANT: this effect must NOT depend on useSearchParams() — node
+    // clicks update the URL via pushState, which changes searchParams and
+    // would re-run this effect, reloading + rebuilding the entire graph on
+    // every click (flicker / focus-mode reset / broken navigation).
+    const repoParam = new URLSearchParams(window.location.search).get("repo") ?? "";
     const [qOwner, qRepo] = repoParam.split("/");
 
     let cancelled = false;
@@ -104,7 +109,8 @@ function RepoPageContent() {
     })();
 
     return () => { cancelled = true; };
-  }, [router, searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router]);
 
   // ── Trust Banner State ──────────────────────────────────────────────────────
   const [showTrustBanner, setShowTrustBanner] = useState(false);
