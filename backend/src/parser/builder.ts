@@ -168,7 +168,7 @@ export function buildGraph(input: BuilderInput): BuilderOutput {
     }
 
     // ── Step 2.10: Dead Code Analysis ─────────────────────────────────────────
-    const deadCodeStats = analyzeDeadCode(fileNodes, validImportEdges, allFunctions);
+    const deadCodeStats = analyzeDeadCode(fileNodes, validImportEdges, allFunctions, startupSignals);
 
     // ── Step 3: Build function ID map ─────────────────────────────────────────
     // maps function name → array of FunctionNode IDs

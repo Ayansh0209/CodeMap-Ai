@@ -241,6 +241,7 @@ export function analyzeDeadCode(
     fileNodes: FileNode[],
     importEdges: ImportEdge[],
     allFunctions: FunctionNode[],
+    startupSignals?: Map<string, boolean>,
 ): DeadCodeStats {
     // Build degree maps
     const inDegree  = new Map<string, number>();
@@ -265,11 +266,42 @@ export function analyzeDeadCode(
         const isFramework = isFrameworkSemanticFile(file);
         const isUtility = isInUtilityFolder(file.id);
 
+        // ── Language-aware exemptions (Phase 5: multi-language) ──────────────
+        // Entry-point immunity: files with startup signals (C/C++/Go main(),
+        // Python __main__ guard) are called by the runtime, never imported.
+        const hasStartupSignals = startupSignals?.get(file.id) === true;
+
+        // C-family: nothing ever #includes a .c/.cpp file — zero in-degree is
+        // the compilation model, not a dead-code signal. Headers (.h) are the
+        // public face of their implementation file.
+        const isCFamily = file.language === "c" || file.language === "cpp";
+        const isCFamilySource = isCFamily && file.kind !== "declaration";
+
+        // A C-family source file is alive if any internal header it includes
+        // is also included by OTHER files (its declarations are consumed
+        // through that header). inDegree > 1: someone besides this file.
+        let aliveViaHeader = false;
+        if (isCFamilySource) {
+            for (const edge of importEdges) {
+                if (edge.source !== file.id) continue;
+                if (!/\.(h|hpp|hh|hxx)$/i.test(edge.target)) continue;
+                if ((inDegree.get(edge.target) ?? 0) > 1) {
+                    aliveViaHeader = true;
+                    break;
+                }
+            }
+        }
+
         // Skip symbol-level analysis for files where unused-export detection
-        // cannot be reliable: framework semantic files and shared utility modules
-        // (especially CommonJS repos where require() doesn't carry symbol info)
-        const skipSymbolAnalysis = isFramework || isUtility;
-        const unusedExports = skipSymbolAnalysis ? [] : findUnusedExports(file.id, allFunctions, importEdges);
+        // cannot be reliable: framework semantic files, shared utility modules
+        // (CommonJS require() carries no symbol info), and C/C++ files —
+        // their symbols are consumed via header declarations and function
+        // pointers, which import edges cannot see. Re-enable for C/C++ once
+        // definitions are matched against header declarations.
+        const skipSymbolAnalysis = isFramework || isUtility || isCFamily;
+        let unusedExports = skipSymbolAnalysis ? [] : findUnusedExports(file.id, allFunctions, importEdges);
+        // main is invoked by the runtime, never imported — never an unused export
+        unusedExports = unusedExports.filter((n) => n !== "main");
         const orphanSymbols = skipSymbolAnalysis ? [] : findOrphanSymbols(file.id, allFunctions);
 
         file.unusedExports = unusedExports;
@@ -279,7 +311,7 @@ export function analyzeDeadCode(
 
         // Evaluate all signals
         const signals: DeadCodeSignals = {
-            zeroInDegree:      inD === 0,
+            zeroInDegree:      inD === 0 && !isCFamilySource,
             zeroOutDegree:     outD === 0,
             noFunctions:       (file.functions?.length ?? 0) === 0,
             notEntryPoint:     !file.isEntryPoint,
@@ -305,6 +337,8 @@ export function analyzeDeadCode(
         if (
             isFramework ||
             isUtility ||
+            hasStartupSignals ||
+            aliveViaHeader ||
             file.kind === "test" ||
             file.kind === "config" ||
             file.kind === "declaration"
