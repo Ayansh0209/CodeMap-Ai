@@ -7,6 +7,10 @@ import javascript from "highlight.js/lib/languages/javascript";
 import xml from "highlight.js/lib/languages/xml";
 import css from "highlight.js/lib/languages/css";
 import json from "highlight.js/lib/languages/json";
+import python from "highlight.js/lib/languages/python";
+import go from "highlight.js/lib/languages/go";
+import c from "highlight.js/lib/languages/c";
+import cpp from "highlight.js/lib/languages/cpp";
 import "highlight.js/styles/github-dark.css";
 
 // Register languages once
@@ -17,6 +21,10 @@ hljs.registerLanguage("css", css);
 hljs.registerLanguage("json", json);
 hljs.registerLanguage("tsx", typescript);
 hljs.registerLanguage("jsx", javascript);
+hljs.registerLanguage("python", python);
+hljs.registerLanguage("go", go);
+hljs.registerLanguage("c", c);
+hljs.registerLanguage("cpp", cpp);
 
 interface CodeViewerProps {
   code: string;
@@ -32,6 +40,9 @@ function detectLanguage(filePath: string): string {
   const map: Record<string, string> = {
     ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx",
     html: "xml", css: "css", json: "json",
+    py: "python", go: "go",
+    c: "c", h: "c",
+    cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", hh: "cpp", hxx: "cpp",
   };
   return map[ext] || "typescript";
 }

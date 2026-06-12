@@ -11,6 +11,9 @@ import { FileNode, ImportEdge, FunctionNode, FileKind, StructureNode } from "../
 import { extractFileLevel } from "./fileLevel";
 import { extractFunctionLevel, extractTestMetadata } from "./functionLevel";
 import { ImportResolver } from "./importResolver";
+import { isTreeSitterFile, LanguageRegistry } from "./treesitter/registry";
+import { RepoFileIndex } from "./treesitter/fileIndex";
+import { processTreeSitterFiles } from "./treesitter/treeSitterProcessor";
 
 const CHUNK_SIZE = 50;
 const CHUNK_PAUSE_MS = 100; // breathing room between chunks
@@ -297,6 +300,25 @@ export async function processAllFiles(
     repoRoot: string,
     onProgress?: (processedSoFar: number, total: number) => void
 ): Promise<ChunkResult> {
+    // ── Language split ────────────────────────────────────────────────────────
+    // JS/TS goes through ts-morph (below). Python/Go/C/C++ go through the
+    // tree-sitter pipeline (parser/treesitter/) which emits identical shapes.
+    const treeSitterDecisions = decisions.filter((d) =>
+        isTreeSitterFile(d.relativePath)
+    );
+    const jsDecisions = decisions.filter(
+        (d) => !isTreeSitterFile(d.relativePath)
+    );
+
+    const totalParseable = decisions.filter((d) => d.mode !== "skip").length;
+    let globalProcessed = 0;
+    const reportProgress = (n: number) => {
+        globalProcessed += n;
+        onProgress?.(globalProcessed, totalParseable);
+    };
+
+    decisions = jsDecisions;
+
     // Filter out "skip" mode — don't pass to ts-morph at all
     const filesToParse = decisions.filter((d) => d.mode !== "skip");
     const skippedFiles = decisions.filter((d) => d.mode === "skip");
@@ -331,7 +353,7 @@ export async function processAllFiles(
         result.routeHandlers.forEach((v, k)  => allRouteHandlers.set(k, v));
 
         processedCount += chunk.length;
-        onProgress?.(processedCount, filesToParse.length);
+        reportProgress(chunk.length);
 
         // breathing room between chunks — lets GC run
         if (i < chunks.length - 1) {
@@ -355,6 +377,41 @@ export async function processAllFiles(
             externalImports: [],
             unresolvedImports: [],
         });
+    }
+
+    // ── Tree-sitter languages (Python / Go / C / C++) ─────────────────────────
+    if (treeSitterDecisions.length > 0) {
+        console.log(
+            `[chunkProcessor] ${treeSitterDecisions.length} files → tree-sitter pipeline`
+        );
+
+        const fileIndex = new RepoFileIndex(
+            repoRoot,
+            treeSitterDecisions.map((d) => ({
+                relativePath: d.relativePath,
+                absolutePath: d.absolutePath,
+            }))
+        );
+        const registry = new LanguageRegistry(fileIndex);
+
+        const tsResult = await processTreeSitterFiles(
+            treeSitterDecisions,
+            repoRoot,
+            fileIndex,
+            registry,
+            (done, _total) => {
+                onProgress?.(
+                    Math.min(globalProcessed + done, totalParseable),
+                    totalParseable
+                );
+            }
+        );
+
+        allFileNodes.push(...tsResult.fileNodes);
+        allImportEdges.push(...tsResult.importEdges);
+        allFunctions.push(...tsResult.allFunctions);
+        tsResult.startupSignals.forEach((v, k) => allStartupSignals.set(k, v));
+        tsResult.routeHandlers.forEach((v, k) => allRouteHandlers.set(k, v));
     }
 
     console.log(

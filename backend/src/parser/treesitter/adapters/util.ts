@@ -1,0 +1,90 @@
+// src/parser/treesitter/adapters/util.ts
+// Shared helpers for tree-sitter adapters.
+
+import type { Node as TSNode } from "web-tree-sitter";
+import { FunctionNode, FunctionKind } from "../../../models/graph";
+
+/** depth-first walk over named nodes; return false from fn to skip subtree */
+export function walk(node: TSNode, fn: (n: TSNode) => boolean | void): void {
+    const stack: TSNode[] = [node];
+    while (stack.length > 0) {
+        const current = stack.pop()!;
+        const descend = fn(current);
+        if (descend === false) continue;
+        for (let i = current.namedChildCount - 1; i >= 0; i--) {
+            const child = current.namedChild(i);
+            if (child) stack.push(child);
+        }
+    }
+}
+
+/** Builds FunctionNodes with collision-safe IDs (overloads, same-name methods). */
+export class FunctionCollector {
+    private usedIds = new Set<string>();
+    readonly functions: FunctionNode[] = [];
+
+    constructor(private filePath: string) {}
+
+    add(params: {
+        name: string;
+        startLine: number;
+        endLine: number;
+        isExported: boolean;
+        isAsync?: boolean;
+        kind: FunctionKind;
+        calls: string[];
+        parentId?: string;
+    }): FunctionNode {
+        let id = `${this.filePath}::${params.name}`;
+        if (this.usedIds.has(id)) {
+            id = `${id}@${params.startLine}`; // overload / duplicate name
+        }
+        this.usedIds.add(id);
+
+        const fn: FunctionNode = {
+            id,
+            name: params.name,
+            filePath: this.filePath,
+            startLine: params.startLine,
+            endLine: params.endLine,
+            isExported: params.isExported,
+            isAsync: params.isAsync,
+            kind: params.kind,
+            parentId: params.parentId,
+            calls: params.calls,       // RAW NAMES — builder resolves to IDs
+            calledBy: [],
+            analysisConfidence: "medium", // call resolution is name-based for non-TS langs
+        };
+        this.functions.push(fn);
+        return fn;
+    }
+}
+
+/** Extract raw call names inside a subtree (callNodeType varies per grammar). */
+export function extractCallNames(
+    node: TSNode,
+    callNodeType: string,
+    functionField: string,
+    nameFromCallee: (callee: TSNode) => string | null
+): string[] {
+    const calls = new Set<string>();
+    walk(node, (n) => {
+        if (n.type === callNodeType) {
+            const callee = n.childForFieldName(functionField);
+            if (callee) {
+                const name = nameFromCallee(callee);
+                if (name) calls.add(name);
+            }
+        }
+    });
+    return [...calls];
+}
+
+/** is this path inside a directory commonly used for tests? */
+export function inTestDir(relativePath: string): boolean {
+    const segments = relativePath.toLowerCase().split("/");
+    return segments.some((s) =>
+        s === "test" || s === "tests" || s === "testing" ||
+        s === "__tests__" || s === "spec" || s === "unittests" || s === "unit_tests"
+    );
+}

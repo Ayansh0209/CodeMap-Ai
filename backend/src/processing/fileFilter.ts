@@ -41,8 +41,8 @@ const SKIP_FILENAME_PATTERNS = [
     "pnpm-lock.yaml",
 ];
 
-// Phase 1: JS/TS only
-// Phase 2: add .py .go .rs .cpp .c .java
+// Phase 1: JS/TS (ts-morph)
+// Phase 5: Python, Go, C, C++ via tree-sitter (see parser/treesitter/)
 const SUPPORTED_EXTENSIONS = new Set([
     ".js",
     ".ts",
@@ -50,6 +50,11 @@ const SUPPORTED_EXTENSIONS = new Set([
     ".tsx",
     ".mjs",
     ".cjs",
+    // tree-sitter languages
+    ".py",
+    ".go",
+    ".c", ".cpp", ".cc", ".cxx", ".c++",
+    ".h", ".hpp", ".hh", ".hxx",
 ]);
 
 export function shouldProcessFile(relativePath: string): boolean {

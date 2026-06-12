@@ -7,7 +7,14 @@
 // depend on this exact shape.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type Language = "typescript" | "javascript" | "unknown";
+export type Language =
+    | "typescript"
+    | "javascript"
+    | "python"
+    | "go"
+    | "c"
+    | "cpp"
+    | "unknown";
 
 export type ParseStatus = "full" | "imports-only" | "skipped";
 

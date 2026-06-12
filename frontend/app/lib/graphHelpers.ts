@@ -11,6 +11,10 @@ const LANGUAGE_COLORS: Record<string, string> = {
   json: "#6b7280",
   css: "#ec4899",
   html: "#ef4444",
+  python: "#3776ab",
+  go: "#00add8",
+  c: "#a8b9cc",
+  cpp: "#f34b7d",
   unknown: "#6b7280",
 };
 
