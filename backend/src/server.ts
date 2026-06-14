@@ -11,9 +11,12 @@ import issueMapRoute from "./routes/issueMap";
 import fileContentRoute from "./routes/fileContent";
 import functionsRoute from "./routes/functions";
 import architectureRoute from "./routes/architecture";
+import graphRoute from "./routes/graph";
 
 const app = express();
 
+// Behind Render's proxy — needed so rate limiting sees real client IPs
+app.set("trust proxy", 1);
 
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
@@ -27,6 +30,7 @@ app.use("/issue-map", issueMapRoute);
 app.use("/file-content", fileContentRoute);
 app.use("/functions", functionsRoute);
 app.use("/architecture", architectureRoute);
+app.use("/graph", graphRoute);
 
 app.get("/", (req, res) => {
     res.send("CodeMap AI Backend Running");
@@ -38,7 +42,7 @@ app.use(errorHandler);
 
 const server = app.listen(config.app.port, () => {
     console.log(`Server running on http://localhost:${config.app.port}`);
-    
+
     // In single-instance environments (like Render Free Tier), start the worker inside the server process
     if (process.env.RUN_WORKER_IN_SERVER === "true") {
         console.log("[server] Starting inline BullMQ worker...");

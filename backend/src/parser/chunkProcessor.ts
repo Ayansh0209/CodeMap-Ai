@@ -1,5 +1,5 @@
 // src/parser/chunkProcessor.ts
-// Processes files in batches of 50 to keep RAM flat
+// Processes files in batches to keep RAM flat
 // Each batch gets its own ts-morph Project instance — disposed after use
 // This is the only file that touches ts-morph directly
 
@@ -11,11 +11,14 @@ import { FileNode, ImportEdge, FunctionNode, FileKind, StructureNode } from "../
 import { extractFileLevel } from "./fileLevel";
 import { extractFunctionLevel, extractTestMetadata } from "./functionLevel";
 import { ImportResolver } from "./importResolver";
+import { config } from "../config/config";
 import { isTreeSitterFile, LanguageRegistry } from "./treesitter/registry";
 import { RepoFileIndex } from "./treesitter/fileIndex";
 import { processTreeSitterFiles } from "./treesitter/treeSitterProcessor";
 
-const CHUNK_SIZE = 50;
+// Env-tunable (PARSE_CHUNK_SIZE). Default 20 — keeps peak RAM flat on small
+// containers (Render free tier). 50 was too aggressive for 512MB.
+const CHUNK_SIZE = config.queue.parseChunkSize;
 const CHUNK_PAUSE_MS = 100; // breathing room between chunks
 
 // ── Chunk helper ─────────────────────────────────────────────────────────────
@@ -36,9 +39,9 @@ function sleep(ms: number): Promise<void> {
 
 function detectFileKind(relativePath: string, sourceFile?: any): FileKind {
     const filename = path.basename(relativePath).toLowerCase();
-    
+
     if (filename.endsWith(".d.ts")) return "declaration";
-    
+
     const pathSegments = relativePath.split(/[\\/]/);
     if (
         filename.includes(".test.") ||
@@ -77,7 +80,7 @@ function detectFileKind(relativePath: string, sourceFile?: any): FileKind {
         filename.startsWith("tailwind.config") ||
         filename.startsWith("postcss.config")
     ) return "config";
-    
+
     return "source";
 }
 
@@ -98,6 +101,45 @@ export interface ChunkResult {
     allFunctions:    FunctionNode[];
     startupSignals:  Map<string, boolean>;  // fileId → hasStartupSignals
     routeHandlers:   Map<string, boolean>;  // fileId → hasRouteHandlers
+}
+
+// ── Checkpointing ─────────────────────────────────────────────────────────────
+// Lets a retried job (after OOM kill / restart) resume from the last finished
+// chunk instead of re-parsing everything. The caller decides where checkpoints
+// live (Redis, disk, ...) — this module only defines the contract + (de)serialization.
+
+export interface ChunkCheckpointStore {
+    load: (chunkIndex: number) => Promise<ChunkResult | null>;
+    save: (chunkIndex: number, result: ChunkResult) => Promise<void>;
+}
+
+/** JSON-safe shape of a ChunkResult (Maps → entry arrays). */
+export interface SerializedChunkResult {
+    fileNodes:      FileNode[];
+    importEdges:    ImportEdge[];
+    allFunctions:   FunctionNode[];
+    startupSignals: [string, boolean][];
+    routeHandlers:  [string, boolean][];
+}
+
+export function serializeChunkResult(r: ChunkResult): SerializedChunkResult {
+    return {
+        fileNodes:      r.fileNodes,
+        importEdges:    r.importEdges,
+        allFunctions:   r.allFunctions,
+        startupSignals: [...r.startupSignals.entries()],
+        routeHandlers:  [...r.routeHandlers.entries()],
+    };
+}
+
+export function deserializeChunkResult(s: SerializedChunkResult): ChunkResult {
+    return {
+        fileNodes:      s.fileNodes,
+        importEdges:    s.importEdges,
+        allFunctions:   s.allFunctions,
+        startupSignals: new Map(s.startupSignals),
+        routeHandlers:  new Map(s.routeHandlers),
+    };
 }
 
 // ── Single chunk processor ────────────────────────────────────────────────────
@@ -207,7 +249,7 @@ async function processChunk(
             const extracted = decision.mode === "full"
                     ? extractFunctionLevel(sourceFile, decision.relativePath)
                     : { functions: [], structures: [] };
-            
+
             const functions: FunctionNode[] = extracted.functions;
             const structures: StructureNode[] = extracted.structures;
 
@@ -298,7 +340,8 @@ async function processChunk(
 export async function processAllFiles(
     decisions: ParseDecision[],
     repoRoot: string,
-    onProgress?: (processedSoFar: number, total: number) => void
+    onProgress?: (processedSoFar: number, total: number) => void,
+    checkpoints?: ChunkCheckpointStore
 ): Promise<ChunkResult> {
     // ── Language split ────────────────────────────────────────────────────────
     // JS/TS goes through ts-morph (below). Python/Go/C/C++ go through the
@@ -344,7 +387,29 @@ export async function processAllFiles(
             `[chunkProcessor] chunk ${i + 1}/${chunks.length} — ${chunk.length} files`
         );
 
-        const result = await processChunk(chunk, repoRoot, resolver, i);
+        // ── Checkpoint: skip chunks already parsed by a previous (crashed) attempt
+        let result: ChunkResult | null = null;
+        if (checkpoints) {
+            try {
+                result = await checkpoints.load(i);
+                if (result) {
+                    console.log(`[chunkProcessor] chunk ${i + 1} restored from checkpoint — skipping parse`);
+                }
+            } catch {
+                result = null; // checkpoint read failure is never fatal
+            }
+        }
+
+        if (!result) {
+            result = await processChunk(chunk, repoRoot, resolver, i);
+            if (checkpoints) {
+                try {
+                    await checkpoints.save(i, result);
+                } catch (err) {
+                    console.warn(`[chunkProcessor] checkpoint save failed (non-fatal):`, (err as Error).message);
+                }
+            }
+        }
 
         allFileNodes.push(...result.fileNodes);
         allImportEdges.push(...result.importEdges);

@@ -6,7 +6,8 @@ import { jobQueue } from "../queue/jobQueue";
 
 const router = Router();
 
-const jobIdSchema = z.string().regex(/^[a-zA-Z0-9-]{1,64}$/, "Invalid jobId");
+// Job IDs are now deterministic "owner--repo" (may contain dots/underscores)
+const jobIdSchema = z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/, "Invalid jobId");
 
 router.get("/:jobId", async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -39,10 +40,15 @@ router.get("/:jobId", async (req: Request, res: Response, next: NextFunction) =>
             }
 
             case "active": {
+                // progress is { percent, step } (object form survives the
+                // sandboxed-processor boundary; job.updateData does not)
+                const p = job.progress as any;
+                const percent = typeof p === "number" ? p : (p?.percent ?? 0);
+                const step = typeof p === "object" && p?.step ? p.step : "processing";
                 return res.json({
                     status: "processing",
-                    progress: job.progress,
-                    step: (job.data as any).currentStep ?? "processing",
+                    progress: percent,
+                    step,
                 });
             }
 
