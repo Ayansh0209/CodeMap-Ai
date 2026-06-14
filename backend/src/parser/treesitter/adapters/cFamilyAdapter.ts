@@ -18,7 +18,7 @@
 import type { Node as TSNode } from "web-tree-sitter";
 import { Language, FileKind, StructureNode, FunctionNode } from "../../../models/graph";
 import { LanguageAdapter, ExtractResult, LangRawImport } from "../types";
-import { walk, FunctionCollector, inTestDir } from "./util";
+import { walk, FunctionCollector, inTestDir, nearestEnclosing, sweepFunctionsOnError } from "./util";
 
 function calleeName(callee: TSNode): string | null {
     switch (callee.type) {
@@ -262,6 +262,20 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
         };
 
         visit(rootNode, null);
+
+        // ERROR-tolerant fallback: when the parse is too broken for the structured
+        // descent to enter ERROR-wrapped class bodies (e.g. nlohmann/json), sweep
+        // the whole tree so functions aren't silently dropped.
+        if (collector.functions.length === 0 && rootNode.hasError) {
+            sweepFunctionsOnError(rootNode, new Set(["function_definition"]), (n) => {
+                const clsNode = nearestEnclosing(n, new Set(["class_specifier", "struct_specifier", "union_specifier"]));
+                const nameNode = clsNode?.childForFieldName("name");
+                const classCtx = nameNode
+                    ? { id: `${relativePath}::${nameNode.text}`, name: nameNode.text }
+                    : null;
+                this.handleFunctionDef(n, classCtx, collector, relativePath, testSuites, testCases);
+            });
+        }
 
         const hasStartupSignals = collector.functions.some((f) => f.name === "main");
 

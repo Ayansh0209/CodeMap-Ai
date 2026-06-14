@@ -88,3 +88,32 @@ export function inTestDir(relativePath: string): boolean {
         s === "__tests__" || s === "spec" || s === "unittests" || s === "unit_tests"
     );
 }
+
+/** Walk up ancestors to the nearest node whose type is in `types`. */
+export function nearestEnclosing(node: TSNode, types: Set<string>): TSNode | null {
+    let a = node.parent;
+    while (a) {
+        if (types.has(a.type)) return a;
+        a = a.parent;
+    }
+    return null;
+}
+
+/**
+ * ERROR-tolerant function sweep. Some files are too malformed for a structured
+ * descent (tree-sitter emits ERROR nodes — e.g. nlohmann/json's extreme C++
+ * templates), so the normal namespace -> class -> function walk can't enter the
+ * ERROR-wrapped bodies and finds nothing. This flat-walks the WHOLE tree
+ * (passing through ERROR nodes) and calls `handle` for every function-like node.
+ * Intended as a fallback only when the structured pass found 0 functions on a
+ * parse that has errors.
+ */
+export function sweepFunctionsOnError(
+    root: TSNode,
+    fnTypes: Set<string>,
+    handle: (node: TSNode) => void
+): void {
+    walk(root, (n) => {
+        if (fnTypes.has(n.type)) handle(n);
+    });
+}

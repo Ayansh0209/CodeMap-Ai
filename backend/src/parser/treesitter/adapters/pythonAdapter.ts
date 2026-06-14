@@ -17,7 +17,7 @@
 import type { Node as TSNode } from "web-tree-sitter";
 import { Language, FileKind, StructureNode } from "../../../models/graph";
 import { LanguageAdapter, ExtractResult, LangRawImport } from "../types";
-import { walk, FunctionCollector, extractCallNames, inTestDir } from "./util";
+import { walk, FunctionCollector, extractCallNames, inTestDir, nearestEnclosing, sweepFunctionsOnError } from "./util";
 
 function calleeName(callee: TSNode): string | null {
     if (callee.type === "identifier") return callee.text;
@@ -208,6 +208,17 @@ export class PythonAdapter implements LanguageAdapter {
         };
 
         visit(rootNode, null);
+
+        // ERROR-tolerant fallback: if a malformed parse left the structured pass
+        // empty, sweep the whole tree so functions aren't silently dropped.
+        if (collector.functions.length === 0 && rootNode.hasError) {
+            sweepFunctionsOnError(rootNode, new Set(["function_definition"]), (n) => {
+                const clsNode = nearestEnclosing(n, new Set(["class_definition"]));
+                const cn = clsNode?.childForFieldName("name")?.text;
+                const parentClass = cn ? { id: `${relativePath}::${cn}`, name: cn } : null;
+                handleFunction(n, parentClass);
+            });
+        }
 
         // module-level startup heuristics beyond __main__ guard
         if (!hasStartupSignals) {

@@ -16,7 +16,7 @@
 import type { Node as TSNode } from "web-tree-sitter";
 import { Language, FileKind, StructureNode } from "../../../models/graph";
 import { LanguageAdapter, ExtractResult, LangRawImport } from "../types";
-import { FunctionCollector, extractCallNames, inTestDir } from "./util";
+import { FunctionCollector, extractCallNames, inTestDir, sweepFunctionsOnError } from "./util";
 
 function calleeName(callee: TSNode): string | null {
     if (callee.type === "identifier") return callee.text;
@@ -167,6 +167,40 @@ export class GoAdapter implements LanguageAdapter {
                     break;
                 }
             }
+        }
+
+        // ERROR-tolerant fallback: if a malformed parse left the top-level loop
+        // empty, sweep the whole tree for func/method decls under ERROR nodes.
+        if (collector.functions.length === 0 && rootNode.hasError) {
+            sweepFunctionsOnError(rootNode, new Set(["function_declaration", "method_declaration"]), (n) => {
+                const nameNode = n.childForFieldName("name");
+                if (!nameNode) return;
+                const calls = extractCallNames(n, "call_expression", "function", calleeName);
+                if (n.type === "method_declaration") {
+                    const receiver = n.childForFieldName("receiver");
+                    const recvType = receiver ? receiverTypeName(receiver) : null;
+                    const bare = nameNode.text;
+                    collector.add({
+                        name: recvType ? `${recvType}.${bare}` : bare,
+                        startLine: n.startPosition.row + 1,
+                        endLine: n.endPosition.row + 1,
+                        isExported: isExportedGo(bare),
+                        kind: "method",
+                        calls,
+                        parentId: recvType ? `${relativePath}::${recvType}` : undefined,
+                    });
+                } else {
+                    const name = nameNode.text;
+                    collector.add({
+                        name,
+                        startLine: n.startPosition.row + 1,
+                        endLine: n.endPosition.row + 1,
+                        isExported: isExportedGo(name),
+                        kind: "function",
+                        calls,
+                    });
+                }
+            });
         }
 
         const hasMain = collector.functions.some((f) => f.name === "main");
