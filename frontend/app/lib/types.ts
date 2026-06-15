@@ -92,6 +92,7 @@ export interface FunctionNodeDTO {
   startLine: number;
   endLine: number;
   isExported: boolean;
+  isDeclaration?: boolean;   // C/C++ header prototype (no body)
   isAsync?: boolean;
   kind: "function" | "arrow" | "method" | "constructor" | "getter" | "setter" | "async" | "component" | "hook" | "reducer" | "route-handler" | "middleware" | "test" | "utility" | "callback" | "context-provider" | "unknown";
   visibility?: "public" | "private" | "protected";

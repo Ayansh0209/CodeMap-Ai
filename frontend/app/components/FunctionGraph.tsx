@@ -10,6 +10,7 @@ import {
   getKindBadge,
   sanitizeFileId,
 } from "../lib/graphHelpers";
+import { functionMarker } from "../lib/functionMarker";
 
 interface FunctionGraphProps {
   selectedFunction: FunctionNodeDTO;
@@ -280,17 +281,22 @@ export default function FunctionGraph({
 
             {/* Badges */}
             <div className="flex items-center justify-center gap-1.5 mt-2">
-              {selectedFunction.isExported && (
-                <span
-                  className="text-[10px] px-1.5 py-0.5 rounded"
-                  style={{
-                    background: "rgba(56,139,253,0.15)",
-                    color: "#58a6ff",
-                  }}
-                >
-                  exported
-                </span>
-              )}
+              {(() => {
+                const marker = functionMarker({
+                  isExported: selectedFunction.isExported,
+                  isDeclaration: selectedFunction.isDeclaration,
+                  filePath: selectedFunction.filePath,
+                });
+                return marker ? (
+                  <span
+                    className="text-[10px] px-1.5 py-0.5 rounded"
+                    style={{ background: marker.bg, color: marker.color }}
+                    title={marker.title}
+                  >
+                    {marker.label}
+                  </span>
+                ) : null;
+              })()}
               {selectedFunction.visibility && (
                 <span
                   className="text-[10px] px-1.5 py-0.5 rounded"
@@ -458,17 +464,22 @@ function FunctionCard({
           title={`Confidence: ${fn.analysisConfidence}`}
         />
 
-        {fn.isExported && (
-          <span
-            className="text-[9px] px-1 py-0.5 rounded shrink-0"
-            style={{
-              background: "rgba(56,139,253,0.15)",
-              color: "#58a6ff",
-            }}
-          >
-            exp
-          </span>
-        )}
+        {(() => {
+          const marker = functionMarker({
+            isExported: fn.isExported,
+            isDeclaration: fn.isDeclaration,
+            filePath: fn.filePath,
+          });
+          return marker ? (
+            <span
+              className="text-[9px] px-1 py-0.5 rounded shrink-0"
+              style={{ background: marker.bg, color: marker.color }}
+              title={marker.title}
+            >
+              {marker.label}
+            </span>
+          ) : null;
+        })()}
       </div>
     </button>
   );

@@ -30,6 +30,7 @@ export class FunctionCollector {
         startLine: number;
         endLine: number;
         isExported: boolean;
+        isDeclaration?: boolean;
         isAsync?: boolean;
         kind: FunctionKind;
         calls: string[];
@@ -48,6 +49,7 @@ export class FunctionCollector {
             startLine: params.startLine,
             endLine: params.endLine,
             isExported: params.isExported,
+            isDeclaration: params.isDeclaration,
             isAsync: params.isAsync,
             kind: params.kind,
             parentId: params.parentId,

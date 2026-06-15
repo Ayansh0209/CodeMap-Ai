@@ -75,8 +75,13 @@ export class LanguageRegistry {
                 this.resolvers.set("cpp", sharedResolver as any);
             }
 
-            // .h grammar choice: pure-C repo → C grammar; any C++ present → C++
-            const headerMode: "c" | "cpp" = cppCount > 0 ? "cpp" : "c";
+            // .h grammar choice: pick the MAJORITY C-family language, not "any C++
+            // present". A predominantly-C repo (e.g. curl, with a few C++ test/util
+            // files) keeps its .h headers parsed and labeled as C; a C++-dominant
+            // repo uses the C++ grammar. The C++ grammar is a near-superset, so the
+            // worst case for a stray C++ header in a C repo is the ERROR-tolerant
+            // fallback — far better than mislabeling every header as cpp.
+            const headerMode: "c" | "cpp" = cppCount > cCount ? "cpp" : "c";
             const header = new HeaderAdapter(headerMode, [".h"]);
             this.adapters.set(".h", header);
             this.resolvers.set(headerMode, sharedResolver as any);

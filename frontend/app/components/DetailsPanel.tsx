@@ -12,6 +12,7 @@ import {
   getKindBadge,
   sanitizeFileId,
 } from "../lib/graphHelpers";
+import { functionMarker } from "../lib/functionMarker";
 import CodeViewer from "./CodeViewer";
 import AIChatTab from "./AIChatTab";
 
@@ -362,18 +363,23 @@ export default function DetailsPanel({
                     L{fn.startLine}-{fn.endLine}
                   </span>
 
-                  {/* Exported badge */}
-                  {fn.isExported && (
-                    <span
-                      className="text-[9px] px-1 py-0.5 rounded shrink-0"
-                      style={{
-                        background: "rgba(56,139,253,0.15)",
-                        color: "#58a6ff",
-                      }}
-                    >
-                      exp
-                    </span>
-                  )}
+                  {/* Language-aware marker badge (exp / exported / static / private / decl) */}
+                  {(() => {
+                    const marker = functionMarker({
+                      isExported: fn.isExported,
+                      isDeclaration: fn.isDeclaration,
+                      filePath: fn.filePath,
+                    });
+                    return marker ? (
+                      <span
+                        className="text-[9px] px-1 py-0.5 rounded shrink-0"
+                        style={{ background: marker.bg, color: marker.color }}
+                        title={marker.title}
+                      >
+                        {marker.label}
+                      </span>
+                    ) : null;
+                  })()}
                 </button>
               ))}
             </div>

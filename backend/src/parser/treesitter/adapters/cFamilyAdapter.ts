@@ -135,6 +135,10 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
         const collector = new FunctionCollector(relativePath);
         const testSuites = new Set<string>();
         const testCases: string[] = [];
+        // Header files carry function *prototypes* (declarations, no body). Source
+        // files carry definitions. We surface prototypes ONLY in headers so .c/.cpp
+        // definitions aren't duplicated by their own forward declarations.
+        const isHeader = this.detectFileKind(relativePath) === "declaration";
 
         // ── includes — anywhere in the tree (handles #ifdef-wrapped includes) ──
         walk(rootNode, (n) => {
@@ -205,6 +209,12 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
 
                     case "declaration":
                     case "type_definition":
+                        // Header prototype: `void Curl_foo(struct x *p);` — a declaration
+                        // whose declarator chain ends in a function_declarator and has no
+                        // body. Only surfaced in headers (see isHeader rationale above).
+                        if (child.type === "declaration" && isHeader) {
+                            this.handlePrototype(child, classCtx, collector, relativePath);
+                        }
                         // typedef struct {...} Foo; → struct may be nested
                         for (let j = 0; j < child.namedChildCount; j++) {
                             const inner = child.namedChild(j);
@@ -321,6 +331,45 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
             isExported: !isStaticDefinition(def),
             kind: isMethod ? "method" : "function",
             calls: extractCalls(def),
+            parentId,
+        });
+    }
+
+    /**
+     * Header prototype: a `declaration` node whose declarator chain ends in a
+     * function_declarator and has no body (e.g. `void Curl_foo(int x);`). Emits a
+     * FunctionNode flagged isDeclaration so the UI can badge it "decl" and so the
+     * call graph knows it has no body (no calls). Function-pointer declarations
+     * and plain variable declarations resolve to no function name and are skipped.
+     */
+    private handlePrototype(
+        decl: TSNode,
+        classCtx: { id: string; name: string } | null,
+        collector: FunctionCollector,
+        relativePath: string
+    ): void {
+        const named = functionNameFromDefinition(decl);
+        if (!named) return;
+
+        let name = named.name;
+        let parentId: string | undefined;
+
+        if (classCtx && !named.qualified) {
+            parentId = classCtx.id;
+            name = `${classCtx.name}.${name}`;
+        } else if (named.qualified && name.includes(".")) {
+            const className = name.split(".")[0];
+            parentId = `${relativePath}::${className}`;
+        }
+
+        collector.add({
+            name,
+            startLine: decl.startPosition.row + 1,
+            endLine: decl.endPosition.row + 1,
+            isExported: !isStaticDefinition(decl),
+            isDeclaration: true,
+            kind: parentId ? "method" : "function",
+            calls: [],
             parentId,
         });
     }

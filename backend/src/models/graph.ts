@@ -59,6 +59,8 @@ export interface FunctionNode {
     startLine: number;
     endLine: number;
     isExported: boolean;
+    isDeclaration?: boolean;       // true for a prototype/forward declaration with no body
+                                   // (C/C++ header prototypes). Drives the "decl" badge.
     isAsync?: boolean;             // whether the function uses async/await
     kind: FunctionKind;
     visibility?: Visibility;       // only set for class methods
