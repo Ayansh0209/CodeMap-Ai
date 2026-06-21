@@ -25,6 +25,7 @@
 import type { RetrievalIndex, RetrievalFileEntry, RetrievalFunction } from "../models/retrieval";
 import type { SearchIntent } from "./issueUnderstanding";
 import type { CandidateFileEntry } from "./issueMapper";
+import { isTestPath } from "./issueMapper";
 import { fetchRawFile } from "../github/issueClient";
 import { redisConnection } from "../queue/jobQueue";
 
@@ -75,11 +76,30 @@ const RAW_FILE_CACHE_TTL_SECONDS = 3600;
 const MAX_TOTAL_SNIPPETS = 20;
 
 /**
- * Emergency safety cap (lines). Any snippet exceeding this is hard-truncated.
- * This is NOT primary filtering — it's a final safety net for parser edge cases
- * where line numbers are wrong or files are unexpectedly huge.
+ * Emergency safety cap (lines) for a SINGLE function slice. Any snippet longer
+ * than this is hard-truncated. Final safety net for parser edge cases where line
+ * numbers are wrong or a "function" spans most of a file. Lowered from 1200 →
+ * 700 so a leaked/huge body can never balloon the prompt.
  */
-const MAX_SNIPPET_LINES = 1200;
+const MAX_SNIPPET_LINES = 700;
+
+/**
+ * Per-FILE line budget across all of that file's snippets. Once a file has
+ * contributed this many lines we stop adding more from it. Stops one big file
+ * (e.g. a parser-confused source file) from eating the whole prompt.
+ */
+const MAX_LINES_PER_FILE = 220;
+
+/**
+ * Tighter limits for TEST files specifically. Tests are allowed in, but a test
+ * suite is often long, repetitive, low-signal, and sometimes parses to 0
+ * functions (ts-morph chokes on the suite). We send at most a couple of
+ * functions and never more than a short preview, so a test file can contribute
+ * context without flooding Gemini.
+ */
+const MAX_TEST_FUNCTIONS = 2;
+const TEST_PREVIEW_LINES = 60;
+const MAX_LINES_PER_TEST_FILE = 100;
 
 // ── Token-based function selection ────────────────────────────────────────────
 
@@ -286,7 +306,7 @@ export async function fetchSnippets(
         candidateEntry: CandidateFileEntry;
         selectedFunctions: Array<{ fn: RetrievalFunction; reasons: string[] }>;
         /** Indicates how to handle files with 0 selected functions */
-        zeroFunctionMode?: "pr-no-metadata" | "structure-pr-partial" | "zero-pr-partial";
+        zeroFunctionMode?: "pr-no-metadata" | "structure-pr-partial" | "zero-pr-partial" | "test-partial";
     }
 
     const selectedFiles: SelectedFile[] = [];
@@ -332,6 +352,12 @@ export async function fetchSnippets(
                     // Non-PR structure-only: drop entirely
                     console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — structure-only file (${structCount} structures)\x1b[0m`);
                 }
+            } else if (isTestPath(candidate.fileId)) {
+                // CASE B-test — a test file that parsed to 0 functions (ts-morph
+                // choked on the suite). Keep only a SHORT preview so it never
+                // dumps an 800-line suite into the prompt.
+                console.log(`\x1b[33m[snippetFetcher] test file w/ 0 functions — short preview ${candidate.fileId}\x1b[0m`);
+                selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "test-partial" });
             } else {
                 // CASE B — True zero-content file (no functions, no structures)
                 if (candidate.source === "pr") {
@@ -339,15 +365,17 @@ export async function fetchSnippets(
                     console.log(`\x1b[33m[snippetFetcher] partial PR fallback fetch ${candidate.fileId}\x1b[0m`);
                     selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "zero-pr-partial" });
                 } else {
-                    // Non-PR zero-content: drop if large, keep partial if small
-                    // lineCount is not on RetrievalFileEntry — estimate from structures
+                    // Non-PR zero-content: drop entirely
                     console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — empty file (0 functions, 0 structures)\x1b[0m`);
                 }
             }
             continue;
         }
 
-        const selected = selectFunctions(fileEntry.functions, candidate.source, tokens);
+        let selected = selectFunctions(fileEntry.functions, candidate.source, tokens);
+        if (isTestPath(candidate.fileId) && selected.length > MAX_TEST_FUNCTIONS) {
+            selected = selected.slice(0, MAX_TEST_FUNCTIONS);
+        }
         selectedFiles.push({ candidateEntry: candidate, selectedFunctions: selected });
     }
 
@@ -393,6 +421,10 @@ export async function fetchSnippets(
                     previewLines = Math.min(80, lines.length);
                     reason = "PR-sourced zero-content file (partial preview)";
                     break;
+                case "test-partial":
+                    previewLines = Math.min(TEST_PREVIEW_LINES, lines.length);
+                    reason = "test file (0 functions parsed — short preview)";
+                    break;
                 case "pr-no-metadata":
                 default:
                     previewLines = Math.min(80, lines.length);
@@ -416,9 +448,16 @@ export async function fetchSnippets(
             continue;
         }
 
-        // Slice individual function bodies
+        // Slice individual function bodies — with a hard per-file line budget so
+        // no single file (test or source) can dominate the prompt.
+        const perFileBudget = isTestPath(fileId) ? MAX_LINES_PER_TEST_FILE : MAX_LINES_PER_FILE;
+        let linesFromThisFile = 0;
         for (const { fn, reasons } of selectedFunctions) {
             if (snippets.length >= MAX_TOTAL_SNIPPETS) break;
+            if (linesFromThisFile >= perFileBudget) {
+                console.log(`\x1b[33m[snippetFetcher] per-file budget hit for ${fileId} (${linesFromThisFile}/${perFileBudget} lines) — skipping remaining functions\x1b[0m`);
+                break;
+            }
 
             let rawBody = sliceFunctionBody(rawContent, fn.startLine, fn.endLine);
 
@@ -429,7 +468,16 @@ export async function fetchSnippets(
                 rawBody = rawLines.slice(0, MAX_SNIPPET_LINES).join("\n") + `\n// ... [truncated at ${MAX_SNIPPET_LINES} lines] ...`;
             }
 
-            const body = semanticTruncate(rawBody);
+            let body = semanticTruncate(rawBody);
+
+            // Clamp this snippet to the file's remaining budget.
+            const remaining = perFileBudget - linesFromThisFile;
+            const bodyLineArr = body.split("\n");
+            if (bodyLineArr.length > remaining) {
+                body = bodyLineArr.slice(0, Math.max(1, remaining)).join("\n")
+                    + `\n// ... [trimmed to per-file budget] ...`;
+            }
+            linesFromThisFile += body.split("\n").length;
 
             snippets.push({
                 fileId,

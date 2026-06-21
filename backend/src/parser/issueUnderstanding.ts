@@ -184,7 +184,25 @@ export function extractSearchIntent(
     // Note: a short issue like "Event creators cannot delete their own events"
     // is NOT vague — it has clear entities. Vagueness is about semantic density,
     // not word count.
-    const isVague = entities.length < MIN_ENTITIES_FOR_SPECIFIC && codeIdentifiers.length === 0;
+    // Strip fenced code blocks, then keep only meaningful body text to gauge how
+    // much signal the issue actually carries.
+    const bodyMeaningful = body
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/[^a-zA-Z0-9]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    // Low-signal issue: very short body AND no concrete code identifiers anywhere.
+    // These (e.g. cscout #5 "Complete C99 support" with no body, or #35
+    // "Add GUI query option to output results as plain text") cannot be located
+    // by token matching — they need a knowledgeable pass over the file map, which
+    // is exactly Stage 2 (Gemini graph navigation). Routing them there mimics a
+    // human who knows the codebase deciding where to look.
+    const isShortLowSignal = bodyMeaningful.length < 80 && codeIdentifiers.length === 0;
+
+    const isVague =
+        (entities.length < MIN_ENTITIES_FOR_SPECIFIC && codeIdentifiers.length === 0) ||
+        isShortLowSignal;
 
     // Cap at 20 to keep traversal focused — more than 20 tokens
     // produces a search space too wide to be useful

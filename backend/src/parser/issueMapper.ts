@@ -66,6 +66,12 @@ export interface CandidateFileEntry {
 const MAX_DIRECT_CANDIDATES = 15;
 
 /**
+ * Maximum TEST files allowed into the candidate set from direct token matches.
+ * Hard ceiling so a large test suite can never dominate the candidates.
+ */
+const MAX_TEST_CANDIDATES = 3;
+
+/**
  * Maximum total candidates after neighborhood expansion.
  * Each file is potentially a GitHub API call — 30 is the practical limit.
  */
@@ -96,11 +102,34 @@ export function isNoisePath(fileId: string): boolean {
     // Auto-generated documentation
     if (lower.includes("/auto-docs/") || lower.includes("/auto-schema/")) return true;
 
-    // Test files — only allowed via PR, not via token match
-    if (/\.(test|spec)\.(ts|js|tsx|jsx)$/i.test(lower)) return true;
-    if (/\/__tests?__\//i.test(lower)) return true;
-    if (/\/test\//i.test(lower)) return true;
+    return false;
+}
 
+/**
+ * Detects test files across the supported languages.
+ *
+ * Test files are NOT noise — a bug can genuinely live in (or be diagnosed from)
+ * a test, so they ARE allowed into the candidate set. But they are tightly
+ * controlled: they only enter via a DIRECT token/path match or a PR (never via
+ * barrel/neighborhood graph expansion), are capped in COUNT here, and are hard
+ * truncated in snippetFetcher so a single large test suite can never flood
+ * Gemini (the historical "0 functions → whole 800-line file sent" failure).
+ */
+export function isTestPath(fileId: string): boolean {
+    const lower = fileId.toLowerCase();
+    // JS/TS: foo.test.ts, foo.spec.tsx
+    if (/\.(test|spec)\.(ts|js|tsx|jsx|mjs|cjs)$/i.test(lower)) return true;
+    // Python: test_foo.py, foo_test.py
+    if (/(^|\/)test_[^/]*\.py$/i.test(lower)) return true;
+    if (/_test\.py$/i.test(lower)) return true;
+    // Go: foo_test.go
+    if (/_test\.go$/i.test(lower)) return true;
+    // C/C++: foo_test.cpp, test_foo.cc (path- or name-delimited)
+    if (/(^|[/_-])tests?[/_-][^/]*\.(c|cc|cpp|cxx|h|hpp|hh)$/i.test(lower)) return true;
+    // Common test directories
+    if (/(^|\/)__tests__\//i.test(lower)) return true;
+    if (/(^|\/)tests?\//i.test(lower)) return true;
+    if (/(^|\/)(spec|specs)\//i.test(lower)) return true;
     return false;
 }
 
@@ -190,6 +219,7 @@ function runBFS(
                 if (neighborId === fileId) continue;
                 if (!graphFileIds.has(neighborId)) continue;
                 if (isNoisePath(neighborId)) continue;
+                if (isTestPath(neighborId)) continue; // tests never enter via expansion
 
                 const incomingScore = currentScore * 0.6;
                 if (incomingScore < 15) continue; // Skip if incoming score is below 15
@@ -268,10 +298,17 @@ function traverseRetrievalGraph(
         }
     }
 
-    // Cap direct matches
-    const cappedMatches = new Set<string>(
-        [...matchedFileIds].slice(0, MAX_DIRECT_CANDIDATES)
-    );
+    // Cap direct matches — keep source files first, allow only a few test files
+    // so a large test suite can never dominate the candidate set.
+    const matchedSource: string[] = [];
+    const matchedTests: string[] = [];
+    for (const id of matchedFileIds) {
+        (isTestPath(id) ? matchedTests : matchedSource).push(id);
+    }
+    const cappedMatches = new Set<string>([
+        ...matchedSource.slice(0, MAX_DIRECT_CANDIDATES),
+        ...matchedTests.slice(0, MAX_TEST_CANDIDATES),
+    ]);
 
     // ── Barrel expansion ──────────────────────────────────────────────────────
     const afterExpansion = expandBarrels(cappedMatches, fileMap);
@@ -357,7 +394,7 @@ export function traverseGraph(
  */
 export function buildCompactGraphMap(retrieval: RetrievalIndex): string {
     return retrieval.files
-        .filter(f => !f.isBarrel && !isNoisePath(f.fileId))
+        .filter(f => !f.isBarrel && !isNoisePath(f.fileId) && !isTestPath(f.fileId))
         .map(f => {
             const fnNames = f.functions
                 .slice(0, 8) // cap function names per file to keep compact
