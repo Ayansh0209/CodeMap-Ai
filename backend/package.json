@@ -8,7 +8,8 @@
     "worker": "ts-node-dev --respawn --transpile-only src/worker.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "start:worker": "node dist/worker.js"
+    "start:worker": "node dist/worker.js",
+    "eval:issues": "ts-node --transpile-only src/scripts/evalIssueMapper.ts"
   },
   "keywords": [],
   "author": "",

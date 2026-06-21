@@ -1,0 +1,17 @@
+[
+  {
+    "owner": "dspinellis",
+    "repo": "cscout",
+    "issueNumber": 81,
+    "note": "Known regression case from handoff: should map html.cpp/html.h, not call.h/stab.h. Ground truth auto-derived from the linked merged PR. If the linked PR isn't detected, set expectedFiles manually."
+  },
+  {
+    "owner": "EXAMPLE_owner",
+    "repo": "EXAMPLE_repo",
+    "issueNumber": 0,
+    "expectedFiles": [
+      "src/path/to/file_the_human_actually_changed.ts"
+    ],
+    "note": "Template entry. Pick CLOSED issues whose closing PR is MERGED so ground truth = real human edits. Analyze the repo in CodeMap first (so its graph+retrieval index exist), then add it here. Aim for 15-30 cases across JS/TS, Python, Go, and C/C++ for a stable signal. Delete this example before running."
+  }
+]
