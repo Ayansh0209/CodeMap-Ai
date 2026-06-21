@@ -70,7 +70,16 @@ const MAX_DIRECT_CANDIDATES = 15;
  * Maximum total candidates after neighborhood expansion.
  * Each file is potentially a GitHub API call — 30 is the practical limit.
  */
-const MAX_TOTAL_CANDIDATES = 30;
+const MAX_TOTAL_CANDIDATES = 12;
+
+/**
+ * Graph expansion is KEPT (the import/call graph is core to CodeMap), but
+ * constrained so it can't balloon the candidate set with weak neighbors:
+ *   - only the strongest seeds are allowed to expand outward
+ *   - only ONE hop (was two — two hops pulled in neighbors-of-neighbors noise)
+ */
+const TOP_SEEDS_FOR_EXPANSION = 5;
+const BFS_MAX_HOPS = 1;
 
 /**
  * Minimum candidates from Stage 1 before the pipeline triggers Stage 2.
@@ -184,15 +193,22 @@ function runBFS(
 ): Array<{ fileId: string; score: number }> {
     const scores = new Map<string, number>();
 
-    // Level 0 (Hops 0)
-    let currentLevel = new Map<string, number>();
+    // Level 0 — ALL seeds keep their score (they remain candidates)...
     for (const seed of seeds) {
-        currentLevel.set(seed.fileId, (currentLevel.get(seed.fileId) ?? 0) + seed.score);
         scores.set(seed.fileId, (scores.get(seed.fileId) ?? 0) + seed.score);
     }
 
-    // Run for maximum 2 hops
-    for (let hop = 0; hop < 2; hop++) {
+    // ...but only the strongest seeds are allowed to EXPAND into the graph.
+    // This keeps graph traversal (we still use imports / importedBy / calls)
+    // while preventing weak seeds from dragging in unrelated neighbors.
+    let currentLevel = new Map<string, number>();
+    const expandable = [...seeds].sort((a, b) => b.score - a.score).slice(0, TOP_SEEDS_FOR_EXPANSION);
+    for (const seed of expandable) {
+        currentLevel.set(seed.fileId, (currentLevel.get(seed.fileId) ?? 0) + seed.score);
+    }
+
+    // Run for a constrained number of hops (1)
+    for (let hop = 0; hop < BFS_MAX_HOPS; hop++) {
         const nextLevel = new Map<string, number>();
 
         for (const [fileId, currentScore] of currentLevel.entries()) {

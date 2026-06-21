@@ -51,6 +51,8 @@ export interface CodeSnippet {
     selectionReasons: string[];
     /** How this file entered the candidate set */
     candidateSource: CandidateFileEntry["source"];
+    /** Lexical/graph rank score (higher = more relevant) — shown to Gemini. */
+    candidateScore?: number;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -203,6 +205,32 @@ function semanticTruncate(body: string): string {
         `// ... [${omitted} lines omitted] ...`,
         ...tail,
     ].join("\n");
+}
+
+// ── Boilerplate stripping (Phase 5: cut wasted tokens) ────────────────────────
+
+/**
+ * Remove zero-signal lines from the TOP of a file before previewing it: license
+ * headers, leading comment blocks, and import/include lines. A naive "first N
+ * lines" preview otherwise wastes the whole budget on the license + imports.
+ * Language-agnostic enough for JS/TS/Py/Go/C/C++.
+ */
+function stripBoilerplate(content: string): string {
+    let lines = content.split("\n");
+    let i = 0;
+    const isBlank = (l: string) => l.trim() === "";
+    const isLineComment = (l: string) => /^\s*(\/\/|#|\*|\/\*|\*\/)/.test(l);
+    const isImport = (l: string) =>
+        /^\s*(import\s|from\s+\S+\s+import\s|export\s+\*|export\s+\{|const\s+\w+\s*=\s*require\(|#include\b|using\s+\w|package\s+\w|use\s+\w)/.test(l);
+
+    // Skip a contiguous leading run of blanks / comments / imports.
+    while (i < lines.length && (isBlank(lines[i]) || isLineComment(lines[i]) || isImport(lines[i]))) {
+        i++;
+    }
+    // Don't strip everything — if the whole head was boilerplate and nothing
+    // meaningful remains close by, fall back to the original.
+    if (i >= lines.length) return content;
+    return lines.slice(i).join("\n");
 }
 
 // ── Raw file caching ──────────────────────────────────────────────────────────
@@ -427,8 +455,9 @@ export async function fetchSnippets(
                     break;
             }
 
-            const body = lines.slice(0, previewLines).join("\n")
-                + (lines.length > previewLines ? `\n// ... [${lines.length - previewLines} more lines omitted] ...` : "");
+            const meaningful = stripBoilerplate(lines.join("\n")).split("\n");
+            const body = meaningful.slice(0, previewLines).join("\n")
+                + (meaningful.length > previewLines ? `\n// ... [${meaningful.length - previewLines} more lines omitted] ...` : "");
 
             snippets.push({
                 fileId,
@@ -439,6 +468,7 @@ export async function fetchSnippets(
                 endLine: previewLines,
                 selectionReasons: [reason],
                 candidateSource: source,
+                candidateScore: candidateEntry.score,
             });
             continue;
         }
@@ -483,14 +513,31 @@ export async function fetchSnippets(
                 endLine: fn.endLine,
                 selectionReasons: reasons,
                 candidateSource: source,
+                candidateScore: candidateEntry.score,
             });
         }
     }
 
+    // Dedupe: drop repeated functionIds and byte-identical bodies (Phase 5).
+    const seenIds = new Set<string>();
+    const seenBodies = new Set<string>();
+    const deduped: CodeSnippet[] = [];
+    for (const snip of snippets) {
+        const bodyKey = snip.body.trim();
+        if (seenIds.has(snip.functionId)) continue;
+        if (bodyKey.length > 0 && seenBodies.has(bodyKey)) continue;
+        seenIds.add(snip.functionId);
+        seenBodies.add(bodyKey);
+        deduped.push(snip);
+    }
+
+    // Highest-ranked snippets first so Gemini reads the strongest candidates up top.
+    deduped.sort((a, b) => (b.candidateScore ?? 0) - (a.candidateScore ?? 0));
+
     console.log(
-        `\x1b[32m[snippetFetcher] selected ${snippets.length} snippets from ` +
+        `\x1b[32m[snippetFetcher] selected ${deduped.length} snippets (from ${snippets.length} pre-dedupe) across ` +
         `${selectedFiles.length}/${candidates.length} candidate files\x1b[0m`
     );
 
-    return snippets;
+    return deduped;
 }

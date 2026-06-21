@@ -104,6 +104,38 @@ export async function loadRetrievalIndex(owner: string, repo: string): Promise<R
     }
 }
 
+// ── Round-2 path resolution ───────────────────────────────────────────────────
+
+/**
+ * Resolve the file paths Gemini asks for in Round 1 against the real graph.
+ * Tries exact match, then basename match, then suffix match — because Gemini
+ * frequently returns a slightly different path string than our fileId. Without
+ * this, Round 2 used to fetch zero files and waste a full Pro call.
+ */
+function resolveRequestedFiles(requested: string[], graphFileIds: Set<string>): string[] {
+    const out = new Set<string>();
+    const ids = [...graphFileIds];
+    const byBase = new Map<string, string[]>();
+    for (const id of ids) {
+        const base = id.split("/").pop()?.toLowerCase() ?? id.toLowerCase();
+        (byBase.get(base) ?? byBase.set(base, []).get(base)!).push(id);
+    }
+    for (const raw of requested) {
+        const norm = raw.replace(/\\/g, "/").replace(/^\.\//, "").trim();
+        if (graphFileIds.has(norm)) { out.add(norm); continue; }
+        const lower = norm.toLowerCase();
+        const base = lower.split("/").pop() ?? lower;
+        const baseHits = byBase.get(base) ?? [];
+        if (baseHits.length === 1) { out.add(baseHits[0]); continue; }
+        // ambiguous basename or none — try suffix match
+        const suffixHit = ids.find(id => id.toLowerCase().endsWith("/" + lower) || id.toLowerCase().endsWith(lower));
+        if (suffixHit) { out.add(suffixHit); continue; }
+        // if basename hit multiple, take the first as a last resort
+        if (baseHits.length > 1) out.add(baseHits[0]);
+    }
+    return [...out];
+}
+
 // ── Stage 3: Iterative Gemini mapping ─────────────────────────────────────────
 
 /**
@@ -162,16 +194,46 @@ async function runStage3(
         };
     }
 
-    // ── Round 2: Gemini requested more files ──────────────────────────────────
+    // ── Phase 4 gate: Round 2 is EXCEPTIONAL, not the default ──────────────────
+    // The expensive second Pro call only earns its cost when Round 1 produced
+    // NOTHING usable AND named files we can actually fetch. If Round 1 already
+    // returned affected files, accept them — do not pay for a second call.
+    if (round1.affectedFiles.length > 0) {
+        console.log(`\x1b[32m[issuePipeline] Round 1 returned ${round1.affectedFiles.length} files (needsMoreContext was set) — accepting, SKIPPING Round 2\x1b[0m`);
+        return {
+            geminiResult: {
+                affectedFiles: round1.affectedFiles,
+                summary: round1.summary,
+                fixApproach: round1.fixApproach,
+            },
+            snippetCount: snippets.length,
+        };
+    }
+
+    // Resolve requested paths against the graph: exact, then basename/suffix
+    // fuzzy match (Gemini often returns slightly-off paths). This is what made
+    // old Round 2 fetch nothing and waste a call.
+    const resolvedRequested = resolveRequestedFiles(round1.requestedFiles, input.graphFileIds);
+
+    if (resolvedRequested.length === 0) {
+        console.log(`\x1b[33m[issuePipeline] Round 1 wanted more files but NONE resolve to the graph — returning Round 1 (no Round 2)\x1b[0m`);
+        return {
+            geminiResult: {
+                affectedFiles: round1.affectedFiles,
+                summary: round1.summary,
+                fixApproach: round1.fixApproach,
+            },
+            snippetCount: snippets.length,
+        };
+    }
+
+    // ── Round 2: Gemini requested more files (and they resolve) ────────────────
     console.log(
-        `\x1b[33m[issuePipeline] Round 2 triggered — Gemini wants ${round1.requestedFiles.length} more files: ` +
+        `\x1b[33m[issuePipeline] Round 2 triggered — ${resolvedRequested.length}/${round1.requestedFiles.length} requested files resolved: ` +
         `${round1.reason}\x1b[0m`
     );
-    console.log(`\x1b[36m[issuePipeline] Requested files:\n${round1.requestedFiles.map(f => `  - ${f}`).join("\n")}\x1b[0m`);
 
-    // Build candidates from Gemini's requested file list
-    const round2Candidates: CandidateFileEntry[] = round1.requestedFiles
-        .filter(fileId => input.graphFileIds.has(fileId)) // only files we know about
+    const round2Candidates: CandidateFileEntry[] = resolvedRequested
         .map(fileId => ({ fileId, source: "gemini-directed" as const }));
 
     let round2Snippets: CodeSnippet[] = [];

@@ -155,9 +155,12 @@ function formatSnippetsForPrompt(snippets: CodeSnippet[]): string {
     }
 
     return snippets.map((s, i) => {
+        const relevance = typeof s.candidateScore === "number"
+            ? `  [relevance ${s.candidateScore.toFixed(1)}, via ${s.candidateSource}]`
+            : "";
         const header = [
             `--- Snippet ${i + 1} ---`,
-            `File: ${s.fileId}`,
+            `File: ${s.fileId}${relevance}`,
             `Function: ${s.functionName} (lines ${s.startLine}-${s.endLine})`,
         ].join("\n");
 
