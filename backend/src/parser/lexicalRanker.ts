@@ -121,6 +121,14 @@ function exactPathBonus(fileId: string, exactPaths: string[]): number {
     return bonus;
 }
 
+/**
+ * True if a file path matches one of the paths the issue named explicitly.
+ * Used to FORCE-INCLUDE issue-named files so they can never be capped out.
+ */
+export function matchesExactPath(fileId: string, exactPaths: string[]): boolean {
+    return exactPathBonus(fileId, exactPaths) > 0;
+}
+
 // ── Main: BM25 ranking ────────────────────────────────────────────────────────
 
 /**

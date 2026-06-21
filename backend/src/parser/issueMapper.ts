@@ -34,7 +34,7 @@ import type {
 } from "../models/schema";
 import type { RetrievalIndex, RetrievalFileEntry } from "../models/retrieval";
 import type { SearchIntent } from "./issueUnderstanding";
-import { rankFiles } from "./lexicalRanker";
+import { rankFiles, matchesExactPath } from "./lexicalRanker";
 import type { LinkedPR } from "../github/issueClient";
 import { searchIndex as runSearch } from "../search/queryEngine";
 
@@ -208,6 +208,7 @@ function runBFS(
     seeds: BFSSeed[],
     fileMap: Map<string, RetrievalFileEntry>,
     graphFileIds: Set<string>,
+    maxCandidates: number = MAX_TOTAL_CANDIDATES,
 ): Array<{ fileId: string; score: number }> {
     const scores = new Map<string, number>();
 
@@ -272,7 +273,7 @@ function runBFS(
         .map(([fileId, score]) => ({ fileId, score }))
         .sort((a, b) => b.score - a.score);
 
-    return sorted.slice(0, MAX_TOTAL_CANDIDATES);
+    return sorted.slice(0, maxCandidates);
 }
 
 // ── Core graph traversal ──────────────────────────────────────────────────────
@@ -322,6 +323,18 @@ function traverseRetrievalGraph(
         ranked.slice(0, MAX_DIRECT_CANDIDATES).map(r => r.fileId),
     );
 
+    // Force-include EVERY file the issue names explicitly (exact path).
+    const exactMatched = new Set<string>();
+    if (intent.exactPaths.length > 0) {
+        for (const f of retrieval.files) {
+            if (isNoisePath(f.fileId)) continue;
+            if (matchesExactPath(f.fileId, intent.exactPaths)) {
+                exactMatched.add(f.fileId);
+                cappedMatches.add(f.fileId);
+            }
+        }
+    }
+
     // ── Barrel expansion ──────────────────────────────────────────────────────
     const afterExpansion = expandBarrels(cappedMatches, fileMap);
 
@@ -340,7 +353,8 @@ function traverseRetrievalGraph(
         if (entry?.isBarrel) continue;
         if (!seedsMap.has(fileId)) {
             const ratio = (bm25Score.get(fileId) ?? 0) / (maxBm25 || 1);
-            seedsMap.set(fileId, { score: 90 + ratio * 40, source: "keyword" });
+            const score = exactMatched.has(fileId) ? 135 : 90 + ratio * 40;
+            seedsMap.set(fileId, { score, source: "keyword" });
         }
     }
 
@@ -357,7 +371,8 @@ function traverseRetrievalGraph(
     }));
 
     // ── Scored BFS Neighborhood expansion ─────────────────────────────────────
-    const bfsResults = runBFS(bfsSeeds, fileMap, graphFileIds);
+    const totalCap = Math.max(MAX_TOTAL_CANDIDATES, exactMatched.size + 5);
+    const bfsResults = runBFS(bfsSeeds, fileMap, graphFileIds, totalCap);
 
     // ── Assemble candidate set ────────────────────────────────────────────────
     const files: CandidateFileEntry[] = bfsResults.map(res => {
