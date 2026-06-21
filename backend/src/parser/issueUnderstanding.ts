@@ -31,6 +31,27 @@ export interface SearchIntent {
     entities: string[];
 
     /**
+     * Explicit file paths / filenames mentioned in the issue (normalized,
+     * lowercased — both the full path and its basename). HIGHEST-precision
+     * signal: if a human wrote `src/html.cpp`, that file is almost certainly
+     * relevant. The lexical ranker gives these a large direct boost.
+     */
+    exactPaths: string[];
+
+    /**
+     * Whole code identifiers from backticks and camelCase/PascalCase words
+     * (e.g. `createEvent`, AgendaItem), lowercased. High-signal — these match
+     * real function/type names. Weighted heavily by the ranker.
+     */
+    strongIdentifiers: string[];
+
+    /**
+     * Plain-English nouns left after stopword removal (e.g. "query", "output").
+     * Low-signal — used by the ranker but down-weighted.
+     */
+    weakTerms: string[];
+
+    /**
      * True when extraction yields insufficient signal for graph traversal.
      *
      * Vague = fewer than 2 meaningful tokens AND no camelCase/PascalCase
@@ -145,6 +166,42 @@ function extractCodeIdentifiers(text: string): string[] {
     return [...new Set(identifiers)];
 }
 
+/**
+ * Extract explicit file paths / filenames mentioned in the issue text.
+ * Runs on RAW text BEFORE tokenize() (which would shred slashes and dots).
+ * Returns both the full normalized path and its basename, lowercased.
+ */
+function extractPaths(text: string): string[] {
+    const out = new Set<string>();
+    const re = /[A-Za-z0-9_.\/\\-]+\.(ts|tsx|js|jsx|mjs|cjs|py|go|c|cc|cpp|cxx|h|hpp|hh|hxx|rs)\b/gi;
+    for (const m of text.matchAll(re)) {
+        const full = m[0].replace(/\\/g, "/").toLowerCase();
+        // Ignore bare extensions / noise like ".ts" with no name
+        if (full.length < 4) continue;
+        out.add(full);
+        const base = full.split("/").pop();
+        if (base) out.add(base);
+    }
+    return [...out];
+}
+
+/**
+ * Extract WHOLE code identifiers (not split into parts):
+ *   - backtick-quoted names: `createEvent`
+ *   - inline camelCase / PascalCase words: createEvent, AgendaItem
+ * Lowercased and deduped.
+ */
+function extractStrongIdentifiers(text: string): string[] {
+    const out = new Set<string>();
+    for (const m of text.matchAll(/`([A-Za-z_$][\w$]+)`/g)) {
+        out.add(m[1].toLowerCase());
+    }
+    for (const m of text.matchAll(/\b([A-Z][a-z]+(?:[A-Z][a-z0-9]*)+|[a-z]+(?:[A-Z][a-z0-9]*)+)\b/g)) {
+        out.add(m[1].toLowerCase());
+    }
+    return [...out];
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 /**
@@ -168,11 +225,24 @@ export function extractSearchIntent(
     // since titles are the most concise description of the issue
     const fullText = [title, title, body, ...comments.slice(0, 5)].join(" ");
 
-    // ── Step 1: Extract tokens ────────────────────────────────────────────────
-    const tokens = tokenize(fullText);
+    // ── Step 1: Extract typed signals ─────────────────────────────────────────
+    // codeIdentifiers = camel/backtick parts (split) — kept for entities[] which
+    // snippetFetcher uses for substring function matching.
     const codeIdentifiers = extractCodeIdentifiers(fullText);
+    const tokens = tokenize(fullText);
 
-    // Merge and deduplicate
+    // Typed, weighted signals for the lexical ranker.
+    const exactPaths = extractPaths(fullText);
+    const strongIdentifiers = extractStrongIdentifiers(fullText);
+    // weak terms = plain tokens that are NOT part of a strong identifier set
+    const strongParts = new Set(
+        strongIdentifiers.flatMap(id =>
+            id.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().split(" "),
+        ),
+    );
+    const weakTerms = tokens.filter(t => !strongParts.has(t));
+
+    // Merge and deduplicate — entities[] stays a superset for backward compat.
     const entities = [...new Set([...codeIdentifiers, ...tokens])];
 
     // ── Step 2: Determine vagueness ───────────────────────────────────────────
@@ -198,10 +268,11 @@ export function extractSearchIntent(
     // by token matching — they need a knowledgeable pass over the file map, which
     // is exactly Stage 2 (Gemini graph navigation). Routing them there mimics a
     // human who knows the codebase deciding where to look.
-    const isShortLowSignal = bodyMeaningful.length < 80 && codeIdentifiers.length === 0;
+    const hasCodeSignal = codeIdentifiers.length > 0 || strongIdentifiers.length > 0 || exactPaths.length > 0;
+    const isShortLowSignal = bodyMeaningful.length < 80 && !hasCodeSignal;
 
     const isVague =
-        (entities.length < MIN_ENTITIES_FOR_SPECIFIC && codeIdentifiers.length === 0) ||
+        (entities.length < MIN_ENTITIES_FOR_SPECIFIC && !hasCodeSignal) ||
         isShortLowSignal;
 
     // Cap at 20 to keep traversal focused — more than 20 tokens
@@ -210,6 +281,9 @@ export function extractSearchIntent(
 
     return {
         entities: finalEntities,
+        exactPaths,
+        strongIdentifiers,
+        weakTerms: weakTerms.slice(0, 20),
         isVague,
     };
 }

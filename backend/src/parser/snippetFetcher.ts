@@ -91,15 +91,13 @@ const MAX_SNIPPET_LINES = 700;
 const MAX_LINES_PER_FILE = 220;
 
 /**
- * Tighter limits for TEST files specifically. Tests are allowed in, but a test
- * suite is often long, repetitive, low-signal, and sometimes parses to 0
- * functions (ts-morph chokes on the suite). We send at most a couple of
- * functions and never more than a short preview, so a test file can contribute
- * context without flooding Gemini.
+ * Test files are retrieved exactly like source files — function-by-function,
+ * using MAX_FUNCTIONS_PER_FILE and MAX_LINES_PER_FILE — because individual test
+ * functions are short and may all be relevant. The ONLY special case is a test
+ * file that the parser reported with 0 functions (it choked on the suite): we
+ * must not dump the whole 800-line suite, so we send a bounded preview instead.
  */
-const MAX_TEST_FUNCTIONS = 2;
-const TEST_PREVIEW_LINES = 60;
-const MAX_LINES_PER_TEST_FILE = 100;
+const TEST_PREVIEW_LINES = 120;
 
 // ── Token-based function selection ────────────────────────────────────────────
 
@@ -372,10 +370,7 @@ export async function fetchSnippets(
             continue;
         }
 
-        let selected = selectFunctions(fileEntry.functions, candidate.source, tokens);
-        if (isTestPath(candidate.fileId) && selected.length > MAX_TEST_FUNCTIONS) {
-            selected = selected.slice(0, MAX_TEST_FUNCTIONS);
-        }
+        const selected = selectFunctions(fileEntry.functions, candidate.source, tokens);
         selectedFiles.push({ candidateEntry: candidate, selectedFunctions: selected });
     }
 
@@ -423,7 +418,7 @@ export async function fetchSnippets(
                     break;
                 case "test-partial":
                     previewLines = Math.min(TEST_PREVIEW_LINES, lines.length);
-                    reason = "test file (0 functions parsed — short preview)";
+                    reason = "test file (0 functions parsed — bounded preview, not full suite)";
                     break;
                 case "pr-no-metadata":
                 default:
@@ -450,7 +445,7 @@ export async function fetchSnippets(
 
         // Slice individual function bodies — with a hard per-file line budget so
         // no single file (test or source) can dominate the prompt.
-        const perFileBudget = isTestPath(fileId) ? MAX_LINES_PER_TEST_FILE : MAX_LINES_PER_FILE;
+        const perFileBudget = MAX_LINES_PER_FILE;
         let linesFromThisFile = 0;
         for (const { fn, reasons } of selectedFunctions) {
             if (snippets.length >= MAX_TOTAL_SNIPPETS) break;

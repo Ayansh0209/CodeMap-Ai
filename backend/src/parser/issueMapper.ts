@@ -34,6 +34,7 @@ import type {
 } from "../models/schema";
 import type { RetrievalIndex, RetrievalFileEntry } from "../models/retrieval";
 import type { SearchIntent } from "./issueUnderstanding";
+import { rankFiles } from "./lexicalRanker";
 import type { LinkedPR } from "../github/issueClient";
 import { searchIndex as runSearch } from "../search/queryEngine";
 
@@ -64,12 +65,6 @@ export interface CandidateFileEntry {
  * Caps direct matches to keep the total manageable after expansion.
  */
 const MAX_DIRECT_CANDIDATES = 15;
-
-/**
- * Maximum TEST files allowed into the candidate set from direct token matches.
- * Hard ceiling so a large test suite can never dominate the candidates.
- */
-const MAX_TEST_CANDIDATES = 3;
 
 /**
  * Maximum total candidates after neighborhood expansion.
@@ -275,40 +270,17 @@ function traverseRetrievalGraph(
         }
     }
 
-    // ── Token-based traversal ─────────────────────────────────────────────────
-    const tokens = intent.entities;
-    const matchedFileIds = new Set<string>();
+    // ── BM25 ranked matching (replaces unscored substring OR-match) ───────────
+    // Score every file against the issue's typed signals and keep the BEST N
+    // (not an arbitrary first N). Tests are ranked like any other file.
+    const ranked = rankFiles(intent, retrieval, MAX_DIRECT_CANDIDATES * 3);
+    const bm25Score = new Map<string, number>();
+    for (const r of ranked) bm25Score.set(r.fileId, r.score);
+    const maxBm25 = ranked.length > 0 ? ranked[0].score : 1;
 
-    for (const fileEntry of retrieval.files) {
-        // Skip noise paths
-        if (isNoisePath(fileEntry.fileId)) continue;
-
-        // Check file path against tokens
-        if (matchesAnyToken(fileEntry.fileId, tokens)) {
-            matchedFileIds.add(fileEntry.fileId);
-            continue;
-        }
-
-        // Check function names against tokens
-        for (const fn of fileEntry.functions) {
-            if (matchesAnyToken(fn.name, tokens)) {
-                matchedFileIds.add(fileEntry.fileId);
-                break; // one match is enough to include the file
-            }
-        }
-    }
-
-    // Cap direct matches — keep source files first, allow only a few test files
-    // so a large test suite can never dominate the candidate set.
-    const matchedSource: string[] = [];
-    const matchedTests: string[] = [];
-    for (const id of matchedFileIds) {
-        (isTestPath(id) ? matchedTests : matchedSource).push(id);
-    }
-    const cappedMatches = new Set<string>([
-        ...matchedSource.slice(0, MAX_DIRECT_CANDIDATES),
-        ...matchedTests.slice(0, MAX_TEST_CANDIDATES),
-    ]);
+    const cappedMatches = new Set<string>(
+        ranked.slice(0, MAX_DIRECT_CANDIDATES).map(r => r.fileId),
+    );
 
     // ── Barrel expansion ──────────────────────────────────────────────────────
     const afterExpansion = expandBarrels(cappedMatches, fileMap);
@@ -318,22 +290,24 @@ function traverseRetrievalGraph(
 
     // 1. PR files (highest priority)
     for (const fileId of prFileIds) {
-        seedsMap.set(fileId, { score: 120, source: "pr" });
+        seedsMap.set(fileId, { score: 140, source: "pr" });
     }
 
-    // 2. Keyword-matched files (excluding barrels that were expanded)
+    // 2. Keyword-matched files — seed score scaled by BM25 rank (90..130) so the
+    //    best lexical matches stay on top through BFS, instead of all tying at 100.
     for (const fileId of cappedMatches) {
         const entry = fileMap.get(fileId);
         if (entry?.isBarrel) continue;
         if (!seedsMap.has(fileId)) {
-            seedsMap.set(fileId, { score: 100, source: "keyword" });
+            const ratio = (bm25Score.get(fileId) ?? 0) / (maxBm25 || 1);
+            seedsMap.set(fileId, { score: 90 + ratio * 40, source: "keyword" });
         }
     }
 
     // 3. Barrel expansion targets
     for (const fileId of afterExpansion) {
         if (!seedsMap.has(fileId)) {
-            seedsMap.set(fileId, { score: 80, source: "barrel-expansion" });
+            seedsMap.set(fileId, { score: 70, source: "barrel-expansion" });
         }
     }
 
