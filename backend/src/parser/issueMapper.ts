@@ -120,21 +120,39 @@ export function isNoisePath(fileId: string): boolean {
  * Gemini (the historical "0 functions → whole 800-line file sent" failure).
  */
 export function isTestPath(fileId: string): boolean {
-    const lower = fileId.toLowerCase();
-    // JS/TS: foo.test.ts, foo.spec.tsx
-    if (/\.(test|spec)\.(ts|js|tsx|jsx|mjs|cjs)$/i.test(lower)) return true;
-    // Python: test_foo.py, foo_test.py
-    if (/(^|\/)test_[^/]*\.py$/i.test(lower)) return true;
-    if (/_test\.py$/i.test(lower)) return true;
-    // Go: foo_test.go
-    if (/_test\.go$/i.test(lower)) return true;
-    // C/C++: foo_test.cpp, test_foo.cc (path- or name-delimited)
-    if (/(^|[/_-])tests?[/_-][^/]*\.(c|cc|cpp|cxx|h|hpp|hh)$/i.test(lower)) return true;
-    // Common test directories
-    if (/(^|\/)__tests__\//i.test(lower)) return true;
-    if (/(^|\/)tests?\//i.test(lower)) return true;
-    if (/(^|\/)(spec|specs)\//i.test(lower)) return true;
-    return false;
+    const norm = fileId.replace(/\\/g, "/");
+    const lower = norm.toLowerCase();
+    const baseOrig = norm.split("/").pop() ?? norm;   // original case (for FooTest.cpp)
+    const base = baseOrig.toLowerCase();
+
+    // Language-NEUTRAL test directories (a test is a test wherever it lives).
+    if (/(^|\/)(test|tests|testing|__tests__|__mocks__|spec|specs)\//.test(lower)) return true;
+
+    const ext = base.match(/\.([a-z0-9+]+)$/)?.[1] ?? "";
+
+    switch (ext) {
+        // ── JavaScript / TypeScript ── foo.test.ts, foo.spec.tsx (NOT FooTest.ts)
+        case "ts": case "tsx": case "js": case "jsx": case "mjs": case "cjs":
+            return /\.(test|spec)\.[a-z]+$/.test(base);
+
+        // ── Python ── test_foo.py, foo_test.py, conftest.py
+        case "py":
+            return /^test_.+\.py$/.test(base) || /_test\.py$/.test(base) || base === "conftest.py";
+
+        // ── Go ── foo_test.go
+        case "go":
+            return /_test\.go$/.test(base);
+
+        // ── C / C++ ── test_foo.cpp, foo_test.cc, foo_tests.cpp, FooTest.cpp
+        case "c": case "cc": case "cpp": case "cxx": case "c++":
+        case "h": case "hpp": case "hh": case "hxx":
+            return /^test_.+\.[a-z+]+$/.test(base)
+                || /_tests?\.[a-z+]+$/.test(base)
+                || /Tests?\.(c|cc|cpp|cxx|c\+\+|h|hpp|hh|hxx)$/.test(baseOrig); // FooTest.cpp / FooTests.cpp
+
+        default:
+            return false;
+    }
 }
 
 // ── Pure substring matching ───────────────────────────────────────────────────
@@ -230,10 +248,16 @@ function runBFS(
                 if (neighborId === fileId) continue;
                 if (!graphFileIds.has(neighborId)) continue;
                 if (isNoisePath(neighborId)) continue;
-                if (isTestPath(neighborId)) continue; // tests never enter via expansion
 
-                const incomingScore = currentScore * 0.6;
-                if (incomingScore < 15) continue; // Skip if incoming score is below 15
+                // Tests ARE reachable through the graph in BOTH directions:
+                // a test imports the file under test (forward) AND shows up in
+                // that file's importedBy (reverse). This is how protected.test.ts
+                // is linked to auth.ts even though its NAME gives no hint — we do
+                // not depend on naming to connect a test to its target. Tests get
+                // a reduced weight so they surface without crowding out source.
+                let incomingScore = currentScore * 0.6;
+                if (isTestPath(neighborId)) incomingScore *= 0.5;
+                if (incomingScore < 15) continue; // below this, the link is too weak
 
                 scores.set(neighborId, (scores.get(neighborId) ?? 0) + incomingScore);
                 nextLevel.set(neighborId, (nextLevel.get(neighborId) ?? 0) + incomingScore);
