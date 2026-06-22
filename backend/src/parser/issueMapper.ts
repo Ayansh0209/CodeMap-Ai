@@ -103,8 +103,26 @@ export function isNoisePath(fileId: string): boolean {
     // TypeScript declaration files — zero behavior
     if (lower.endsWith(".d.ts")) return true;
 
+    // Generated GraphQL typings / introspection (e.g. gql.tada.d.ts, *-env.d.ts)
+    if (lower.includes("gql.tada") || lower.endsWith("-env.d.ts")) return true;
+
+    // Generated source (codegen output)
+    if (lower.includes(".generated.") || lower.endsWith(".gen.ts") || lower.endsWith(".gen.js")) return true;
+
+    // Generated SDL / schema dumps
+    if (lower.endsWith("schema.graphql") || lower.endsWith("schema.gql")) return true;
+
     // Auto-generated documentation
     if (lower.includes("/auto-docs/") || lower.includes("/auto-schema/")) return true;
+
+    // Build output / vendored / coverage — never the hand-edited source
+    if (/(^|\/)(dist|build|out|node_modules|vendor|coverage|__generated__)\//.test(lower)) return true;
+
+    // Minified / amalgamated single-file bundles
+    if (lower.includes(".min.")) return true;
+
+    // Lock files
+    if (/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(lower)) return true;
 
     return false;
 }

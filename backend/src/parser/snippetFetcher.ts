@@ -25,7 +25,7 @@
 import type { RetrievalIndex, RetrievalFileEntry, RetrievalFunction } from "../models/retrieval";
 import type { SearchIntent } from "./issueUnderstanding";
 import type { CandidateFileEntry } from "./issueMapper";
-import { isTestPath } from "./issueMapper";
+import { isTestPath, isNoisePath } from "./issueMapper";
 import { fetchRawFile } from "../github/issueClient";
 import { redisConnection } from "../queue/jobQueue";
 
@@ -391,9 +391,16 @@ export async function fetchSnippets(
     const selectedFiles: SelectedFile[] = [];
 
     for (const candidate of candidates) {
+        // Drop generated / declaration / build files BEFORE fetching — even when
+        // they come from a linked PR. These (gql.tada.d.ts, *.generated.*,
+        // schema.graphql, dist/…) are regenerated, never hand-edited, and their
+        // huge bodies were ballooning the Gemini prompt (and cost) for nothing.
+        if (isNoisePath(candidate.fileId)) {
+            console.log(`\x1b[33m[snippetFetcher] dropping generated/declaration file ${candidate.fileId}\x1b[0m`);
+            continue;
+        }
+
         const fileEntry = fileMap.get(candidate.fileId);
-
-
 
         const isStrongCandidate = candidate.source === "pr"
             || candidate.source === "keyword"
