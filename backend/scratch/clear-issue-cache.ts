@@ -14,25 +14,35 @@ const redis = new IORedis(redisUrl);
 const issueNumber = process.argv[2];
 
 if (!issueNumber) {
-    console.error("Please provide an issue number");
+    console.error("Please provide an issue number or 'all'");
     process.exit(1);
 }
 
 async function clearCache() {
-    console.log(`Searching for keys related to issue #${issueNumber}...`);
-    
-    // Pattern: issue-map:*:*:issueNumber:*
-    const pattern = `issue-map:*:*:${issueNumber}:*`;
-    const keys = await redis.keys(pattern);
+    let keys: string[] = [];
+    if (issueNumber.toLowerCase() === "all") {
+        console.log("Searching for all issue-map and issue-chat-ctx keys...");
+        const pattern1 = "issue-map:*";
+        const pattern2 = "issue-chat-ctx:*";
+        const keys1 = await redis.keys(pattern1);
+        const keys2 = await redis.keys(pattern2);
+        keys = [...keys1, ...keys2];
+    } else {
+        console.log(`Searching for keys related to issue #${issueNumber}...`);
+        
+        // Pattern: issue-map:*:*:issueNumber:*
+        const pattern = `issue-map:*:*:${issueNumber}:*`;
+        keys = await redis.keys(pattern);
+    }
 
     if (keys.length === 0) {
-        console.log("No cached data found for this issue.");
+        console.log("No cached data found.");
     } else {
         console.log(`Found ${keys.length} keys:`);
         keys.forEach(k => console.log(`  - ${k}`));
         
         await redis.del(...keys);
-        console.log("\x1b[32mSuccessfully deleted cached data for this issue.\x1b[0m");
+        console.log("\x1b[32mSuccessfully deleted cached data.\x1b[0m");
     }
 
     process.exit(0);
