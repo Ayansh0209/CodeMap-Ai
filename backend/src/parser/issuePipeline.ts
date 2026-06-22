@@ -216,6 +216,32 @@ async function runStage3(
     const resolvedRequested = resolveRequestedFiles(round1.requestedFiles, input.graphFileIds);
 
     if (resolvedRequested.length === 0) {
+        // Gemini named files but none are in the graph. These are almost always
+        // config / CI / Docker / shell files (.sh, .yml, Dockerfile) that CodeMap
+        // does not index — and Gemini just told us WHERE the fix lives. Surface
+        // those names (clearly labelled as out-of-graph) instead of discarding
+        // them; otherwise the real answer is lost behind the source fallback.
+        const namedOutside = round1.requestedFiles
+            .filter(f => typeof f === "string" && f.trim().length > 0)
+            .slice(0, 6)
+            .map(f => ({
+                fileId: f.trim(),
+                confidence: 55,
+                reason: "Identified by the AI as likely-affected, but OUTSIDE CodeMap's indexed source — most likely a shell / YAML / Dockerfile / config file the graph does not analyze. Open it directly to verify.",
+            }));
+
+        if (namedOutside.length > 0) {
+            console.log(`\x1b[33m[issuePipeline] requested files unresolved — surfacing ${namedOutside.length} AI-identified out-of-graph files (likely config/CI/Docker)\x1b[0m`);
+            return {
+                geminiResult: {
+                    affectedFiles: namedOutside,
+                    summary: round1.summary || round1.reason || "The fix appears to live in config/CI/Docker files that CodeMap does not index. The files below are the AI's best guess at where to look.",
+                    fixApproach: round1.fixApproach || "",
+                },
+                snippetCount: snippets.length,
+            };
+        }
+
         console.log(`\x1b[33m[issuePipeline] Round 1 wanted more files but NONE resolve to the graph — returning Round 1 (no Round 2)\x1b[0m`);
         return {
             geminiResult: {
