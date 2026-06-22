@@ -369,6 +369,7 @@ IMPORTANT:
 - Confidence 90+ means you can point to specific lines
 - Confidence 50-70 means you're in the right area but want more context
 - Only include files from the snippets in affectedFiles
+- If implementing the fix would require ADDING or UPDATING tests, and relevant test files (e.g. *.test.ts, *.spec.ts, *_test.go, test_*.py) appear in the snippets, include the most relevant test file(s) in affectedFiles, with a reason noting they are tests to add/update. Never invent a test file that is not in the snippets, and do not include tests if the fix needs no test change.
 `;
 
     try {
@@ -452,6 +453,7 @@ ${snippetSection}
 INSTRUCTIONS
 ═══════════════════════════════════════════════
 Return your FINAL answer. Identify the affected files with reasoning grounded in the code.
+If implementing the fix would require adding or updating tests, and relevant test files appear in the snippets above, include the most relevant test file(s) in affectedFiles with a reason noting they are tests to add/update (never invent test files not shown above).
 
 Return JSON:
 {
