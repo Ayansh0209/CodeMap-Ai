@@ -75,7 +75,7 @@ const RAW_FILE_CACHE_TTL_SECONDS = 3600;
 /**
  * Maximum total snippets to send to Gemini.
  */
-const MAX_TOTAL_SNIPPETS = 26;
+const MAX_TOTAL_SNIPPETS = 20;
 
 /**
  * Emergency safety cap (lines) for a SINGLE function slice. Any snippet longer

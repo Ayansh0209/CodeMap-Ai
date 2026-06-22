@@ -128,12 +128,9 @@ export function isNoisePath(fileId: string): boolean {
 }
 
 /**
- * "Low-signal" paths: documentation example/sample/demo SOURCE files. These
- * match issue keywords by filename (e.g. docs/.../examples/basic_json__*.cpp)
- * but are almost never the fix target. They are excluded from RANKING and graph
- * expansion so they don't flood the candidate set — but, unlike isNoisePath,
- * they are NOT hard-dropped, so they can still surface if the issue names one
- * explicitly (exact-path) or a PR touches it.
+ * "Low-signal" paths: documentation example/sample/demo SOURCE files. They match
+ * issue keywords by filename but are almost never the fix target. Excluded from
+ * ranking/expansion, but NOT hard-dropped — still reachable via exact-path or PR.
  */
 export function isLowSignalPath(fileId: string): boolean {
     const lower = fileId.toLowerCase();
@@ -281,7 +278,7 @@ function runBFS(
                 if (neighborId === fileId) continue;
                 if (!graphFileIds.has(neighborId)) continue;
                 if (isNoisePath(neighborId)) continue;
-                if (isLowSignalPath(neighborId)) continue; // docs/examples never expand in
+                if (isLowSignalPath(neighborId)) continue;
 
                 // Tests ARE reachable through the graph in BOTH directions:
                 // a test imports the file under test (forward) AND shows up in

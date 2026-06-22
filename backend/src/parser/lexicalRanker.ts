@@ -26,11 +26,14 @@
 
 import type { RetrievalIndex, RetrievalFileEntry } from "../models/retrieval";
 import type { SearchIntent } from "./issueUnderstanding";
-import { isNoisePath, isLowSignalPath } from "./issueMapper";
+import { isNoisePath, isLowSignalPath, isTestPath } from "./issueMapper";
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
 
 const BM25_K1 = 1.2;
+
+/** Tests are down-weighted in ranking so a pile of test files can't bury source. */
+const TEST_RANK_PENALTY = 0.55;
 const BM25_B = 0.75;
 
 /** Query-term weights by signal type. */
@@ -153,7 +156,7 @@ export function rankFiles(
 
     for (const f of retrieval.files) {
         if (isNoisePath(f.fileId)) continue;
-        if (isLowSignalPath(f.fileId)) continue; // docs/examples don't flood ranking
+        if (isLowSignalPath(f.fileId)) continue;
         const tokens = fileDocument(f);
         const tf = new Map<string, number>();
         for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);
@@ -175,15 +178,18 @@ export function rankFiles(
 
     const results: RankedFile[] = [];
     for (const doc of docs) {
-        let score = 0;
+        let bm25 = 0;
         for (const { token, weight } of queryTerms) {
             const tf = doc.tf.get(token);
             if (!tf) continue;
             const idfT = idf.get(token) ?? 0;
             const denom = tf + BM25_K1 * (1 - BM25_B + BM25_B * (doc.len / avgdl));
-            score += weight * idfT * ((tf * (BM25_K1 + 1)) / denom);
+            bm25 += weight * idfT * ((tf * (BM25_K1 + 1)) / denom);
         }
-        score += exactPathBonus(doc.fileId, intent.exactPaths);
+        // Down-weight test files so they don't outrank/bury source. The exact-path
+        // bonus is added AFTER, so a test the issue names explicitly still ranks high.
+        if (isTestPath(doc.fileId)) bm25 *= TEST_RANK_PENALTY;
+        const score = bm25 + exactPathBonus(doc.fileId, intent.exactPaths);
         if (score > 0) results.push({ fileId: doc.fileId, score });
     }
 

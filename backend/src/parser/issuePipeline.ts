@@ -27,7 +27,7 @@
 
 import { extractSearchIntent } from "./issueUnderstanding";
 import type { SearchIntent } from "./issueUnderstanding";
-import { traverseGraph, buildCompactGraphMap, MIN_CANDIDATES_FOR_STAGE1 } from "./issueMapper";
+import { traverseGraph, buildCompactGraphMap, MIN_CANDIDATES_FOR_STAGE1, isTestPath } from "./issueMapper";
 import type { CandidateSet, CandidateFileEntry } from "./issueMapper";
 import { fetchSnippets } from "./snippetFetcher";
 import type { CodeSnippet } from "./snippetFetcher";
@@ -291,6 +291,25 @@ async function runLegacyPipeline(
     return { geminiResult, snippetCount: 0 };
 }
 
+// ── Graceful fallback ─────────────────────────────────────────────────────────
+
+/**
+ * When Gemini returns NO files (e.g. it asked for config files like shell/YAML/
+ * Dockerfile that CodeMap doesn't index), don't return nothing. Hand back the
+ * top retrieved candidates (source first) at low confidence so the user always
+ * gets a useful starting point.
+ */
+function buildFallbackFiles(candidates: CandidateFileEntry[], limit = 5): AffectedFile[] {
+    const sorted = [...candidates].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const nonTest = sorted.filter(c => !isTestPath(c.fileId));
+    const picked = (nonTest.length > 0 ? nonTest : sorted).slice(0, limit);
+    return picked.map(c => ({
+        fileId: c.fileId,
+        confidence: 30,
+        reason: "Retrieved by code search as a likely-related file. The AI could not confirm the exact change — the real fix may also involve files CodeMap does not index (e.g. shell, YAML, or Dockerfile config).",
+    }));
+}
+
 // ── Main entry point ──────────────────────────────────────────────────────────
 
 /**
@@ -427,8 +446,18 @@ export async function runIssueMappingPipeline(
         const { geminiResult, snippetCount } = await runStage3(
             mergedCandidates, retrieval, intent, input
         );
+        let finalGemini = geminiResult;
+        if (!finalGemini || finalGemini.affectedFiles.length === 0) {
+            const fb = buildFallbackFiles(mergedCandidates);
+            console.log(`\x1b[33m[issuePipeline] Gemini returned 0 files — graceful fallback to ${fb.length} top candidates\x1b[0m`);
+            finalGemini = {
+                affectedFiles: fb,
+                summary: finalGemini?.summary || "The AI could not confirm specific files. These are the most likely-related files from code search; the actual fix may involve config files (shell/YAML/Dockerfile) that are not indexed.",
+                fixApproach: finalGemini?.fixApproach || "",
+            };
+        }
         return {
-            geminiResult,
+            geminiResult: finalGemini,
             usedNewPipeline: true,
             snippetCount,
             isVague: intent.isVague,
