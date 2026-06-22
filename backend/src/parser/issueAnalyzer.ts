@@ -369,6 +369,7 @@ IMPORTANT:
 - Confidence 90+ means you can point to specific lines
 - Confidence 50-70 means you're in the right area but want more context
 - Only include files from the snippets in affectedFiles
+- CRITICAL: If you are confident the real fix belongs in a SPECIFIC file that is NOT among the snippets above (e.g. a Dockerfile/Containerfile, CI / GitHub-workflow YAML, shell script, package.json, or other config/build file), choose Option B (needsMoreContext: true) and put that exact file path in requestedFiles — even if you cannot see its contents. Do NOT return Option A with an empty affectedFiles list; naming the correct out-of-snippet file is far more useful than returning nothing.
 - If implementing the fix would require ADDING or UPDATING tests, and relevant test files (e.g. *.test.ts, *.spec.ts, *_test.go, test_*.py) appear in the snippets, include ALL relevant test file(s) in affectedFiles, with a reason noting they are tests to add/update. Never invent a test file that is not in the snippets, and do not include tests if the fix needs no test change.
 `;
 
