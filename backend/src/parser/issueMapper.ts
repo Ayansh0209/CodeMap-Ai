@@ -128,6 +128,20 @@ export function isNoisePath(fileId: string): boolean {
 }
 
 /**
+ * "Low-signal" paths: documentation example/sample/demo SOURCE files. These
+ * match issue keywords by filename (e.g. docs/.../examples/basic_json__*.cpp)
+ * but are almost never the fix target. They are excluded from RANKING and graph
+ * expansion so they don't flood the candidate set — but, unlike isNoisePath,
+ * they are NOT hard-dropped, so they can still surface if the issue names one
+ * explicitly (exact-path) or a PR touches it.
+ */
+export function isLowSignalPath(fileId: string): boolean {
+    const lower = fileId.toLowerCase();
+    if (/(^|\/)(docs?|mkdocs|examples?|samples?|demos?)\//.test(lower)) return true;
+    return false;
+}
+
+/**
  * Detects test files across the supported languages.
  *
  * Test files are NOT noise — a bug can genuinely live in (or be diagnosed from)
@@ -267,6 +281,7 @@ function runBFS(
                 if (neighborId === fileId) continue;
                 if (!graphFileIds.has(neighborId)) continue;
                 if (isNoisePath(neighborId)) continue;
+                if (isLowSignalPath(neighborId)) continue; // docs/examples never expand in
 
                 // Tests ARE reachable through the graph in BOTH directions:
                 // a test imports the file under test (forward) AND shows up in
@@ -441,7 +456,7 @@ export function traverseGraph(
  */
 export function buildCompactGraphMap(retrieval: RetrievalIndex): string {
     return retrieval.files
-        .filter(f => !f.isBarrel && !isNoisePath(f.fileId) && !isTestPath(f.fileId))
+        .filter(f => !f.isBarrel && !isNoisePath(f.fileId) && !isTestPath(f.fileId) && !isLowSignalPath(f.fileId))
         .map(f => {
             const fnNames = f.functions
                 .slice(0, 8) // cap function names per file to keep compact

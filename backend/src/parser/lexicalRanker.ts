@@ -26,7 +26,7 @@
 
 import type { RetrievalIndex, RetrievalFileEntry } from "../models/retrieval";
 import type { SearchIntent } from "./issueUnderstanding";
-import { isNoisePath } from "./issueMapper";
+import { isNoisePath, isLowSignalPath } from "./issueMapper";
 
 // ── Tuning ────────────────────────────────────────────────────────────────────
 
@@ -153,6 +153,7 @@ export function rankFiles(
 
     for (const f of retrieval.files) {
         if (isNoisePath(f.fileId)) continue;
+        if (isLowSignalPath(f.fileId)) continue; // docs/examples don't flood ranking
         const tokens = fileDocument(f);
         const tf = new Map<string, number>();
         for (const t of tokens) tf.set(t, (tf.get(t) ?? 0) + 1);

@@ -63,7 +63,7 @@ export interface CodeSnippet {
  * 5 is the empirical sweet spot: enough to cover different call paths,
  * not so many that context is wasted.
  */
-const MAX_FUNCTIONS_PER_FILE = 5;
+const MAX_FUNCTIONS_PER_FILE = 4;
 
 
 
@@ -75,7 +75,7 @@ const RAW_FILE_CACHE_TTL_SECONDS = 3600;
 /**
  * Maximum total snippets to send to Gemini.
  */
-const MAX_TOTAL_SNIPPETS = 20;
+const MAX_TOTAL_SNIPPETS = 26;
 
 /**
  * Emergency safety cap (lines) for a SINGLE function slice. Any snippet longer
