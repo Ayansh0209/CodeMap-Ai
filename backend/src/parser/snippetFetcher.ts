@@ -101,6 +101,9 @@ const MAX_LINES_PER_FILE = 220;
  */
 const TEST_PREVIEW_LINES = 120;
 
+/** Bounded preview for definition/schema files with no parsed symbols. */
+const CONTENT_PREVIEW_LINES = 100;
+
 // ── Token-based function selection ────────────────────────────────────────────
 
 /**
@@ -180,6 +183,56 @@ function selectFunctions(
                 reasons: [`included from ${source}`],
             }));
     }
+}
+
+// ── Structure selection (enums / classes / types / schema definitions) ────────
+
+/**
+ * Select structures from a file the same way we select functions, then expose
+ * them as function-shaped slices so Phase B can slice their bodies uniformly.
+ * This is what makes definition & schema files retrievable universally — across
+ * any language and any framework/DB (GraphQL, Mongo/Prisma models, Redis schema,
+ * C/C++ structs, Go types, Python classes) — instead of being dropped.
+ */
+function selectStructures(
+    structures: Array<{ name: string; startLine: number; endLine: number }>,
+    source: CandidateFileEntry["source"],
+    tokens: string[],
+    fileId: string,
+): Array<{ fn: RetrievalFunction; reasons: string[] }> {
+    if (structures.length === 0) return [];
+
+    const toFn = (st: { name: string; startLine: number; endLine: number }, reason: string) => ({
+        fn: {
+            id: `${fileId}::${st.name}`,
+            name: st.name,
+            filePath: fileId,
+            startLine: st.startLine,
+            endLine: st.endLine,
+            kind: "structure",
+            isExported: true,
+            isAsync: false,
+            hasAuthCheck: false,
+            hasDatabaseCall: false,
+            calls: [] as string[],
+        } as RetrievalFunction,
+        reasons: [reason],
+    });
+
+    if (source === "keyword" || source === "gemini-directed") {
+        const matched = structures.filter(st => {
+            const n = st.name.toLowerCase();
+            return tokens.some(t => n.includes(t));
+        });
+        if (matched.length > 0) {
+            return matched.slice(0, MAX_FUNCTIONS_PER_FILE)
+                .map(st => toFn(st, "structure name matches issue tokens (enum/class/type/schema)"));
+        }
+    }
+
+    // PR → take more; others → a few representative structures
+    const cap = source === "pr" ? MAX_FUNCTIONS_PER_FILE : 3;
+    return structures.slice(0, cap).map(st => toFn(st, `${source} — representative structure (${st.name})`));
 }
 
 // ── Semantic truncation ───────────────────────────────────────────────────────
@@ -332,7 +385,7 @@ export async function fetchSnippets(
         candidateEntry: CandidateFileEntry;
         selectedFunctions: Array<{ fn: RetrievalFunction; reasons: string[] }>;
         /** Indicates how to handle files with 0 selected functions */
-        zeroFunctionMode?: "pr-no-metadata" | "structure-pr-partial" | "zero-pr-partial" | "test-partial";
+        zeroFunctionMode?: "pr-no-metadata" | "structure-pr-partial" | "zero-pr-partial" | "test-partial" | "content-preview" | "barrel-summary";
     }
 
     const selectedFiles: SelectedFile[] = [];
@@ -342,8 +395,19 @@ export async function fetchSnippets(
 
 
 
+        const isStrongCandidate = candidate.source === "pr"
+            || candidate.source === "keyword"
+            || candidate.source === "gemini-directed";
+
         if (fileEntry?.isBarrel === true) {
-            console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — barrel (isBarrel=true)\x1b[0m`);
+            // Don't silently drop a barrel that genuinely matched. Send a CHEAP
+            // one-line re-export summary (~20 tokens), never its full body. The
+            // full body is only fetched if Gemini asks for it in Round 2.
+            if (isStrongCandidate) {
+                selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "barrel-summary" });
+            } else {
+                console.log(`\x1b[33m[snippetFetcher] dropping weak barrel candidate ${candidate.fileId}\x1b[0m`);
+            }
             continue;
         }
 
@@ -355,45 +419,29 @@ export async function fetchSnippets(
             continue;
         }
 
-        const looksLikeBarrel = fileEntry.functions.length === 0
-            && (fileEntry.structures?.length ?? 0) === 0
-            && fileEntry.imports.length > 0;
-
-        if (looksLikeBarrel) {
-            console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — structural barrel (0 fns, 0 structs, has imports)\x1b[0m`);
-            continue;
-        }
-
-        // ── Zero-function handling ─────────────────────────────────────────────
+        // ── 0-function files: structures, content preview, test, or barrel ─────
         if (fileEntry.functions.length === 0) {
-            const structCount = fileEntry.structures?.length ?? 0;
+            const structures = fileEntry.structures ?? [];
 
-            if (structCount > 0) {
-                // CASE A — Structure-only file (types, interfaces, enums, consts)
-                if (candidate.source === "pr") {
-                    // PR-linked structure file: keep a tiny preview (first 40-80 lines)
-                    console.log(`\x1b[33m[snippetFetcher] structure-only PR file — partial fetch ${candidate.fileId}\x1b[0m`);
-                    selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "structure-pr-partial" });
-                } else {
-                    // Non-PR structure-only: drop entirely
-                    console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — structure-only file (${structCount} structures)\x1b[0m`);
-                }
+            if (structures.length > 0) {
+                // Structure-only file (enum / class / interface / type / schema
+                // definition). Slice the structures just like functions, for ANY
+                // source — universal across languages and frameworks/DBs.
+                const selectedStructs = selectStructures(structures, candidate.source, tokens, candidate.fileId);
+                selectedFiles.push({ candidateEntry: candidate, selectedFunctions: selectedStructs });
             } else if (isTestPath(candidate.fileId)) {
-                // CASE B-test — a test file that parsed to 0 functions (ts-morph
-                // choked on the suite). Keep only a SHORT preview so it never
-                // dumps an 800-line suite into the prompt.
-                console.log(`\x1b[33m[snippetFetcher] test file w/ 0 functions — short preview ${candidate.fileId}\x1b[0m`);
+                // Test file the parser reported with 0 functions — bounded preview.
                 selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "test-partial" });
+            } else if (isStrongCandidate) {
+                // No parsed symbols at all but a STRONG candidate (named in issue,
+                // PR, or top-ranked): could be a macro-only header or a schema
+                // written in a form the parser doesn't model. Bounded, stripped
+                // preview. Phase B drops it if nothing survives stripping (= true
+                // barrel), so this never floods Gemini with vague files.
+                selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "content-preview" });
             } else {
-                // CASE B — True zero-content file (no functions, no structures)
-                if (candidate.source === "pr") {
-                    // PR-sourced: keep partial preview
-                    console.log(`\x1b[33m[snippetFetcher] partial PR fallback fetch ${candidate.fileId}\x1b[0m`);
-                    selectedFiles.push({ candidateEntry: candidate, selectedFunctions: [], zeroFunctionMode: "zero-pr-partial" });
-                } else {
-                    // Non-PR zero-content: drop entirely
-                    console.log(`\x1b[33m[snippetFetcher] dropping ${candidate.fileId} — empty file (0 functions, 0 structures)\x1b[0m`);
-                }
+                // Weak candidate (neighborhood / barrel-expansion), no symbols → drop.
+                console.log(`\x1b[33m[snippetFetcher] dropping weak symbol-less candidate ${candidate.fileId}\x1b[0m`);
             }
             continue;
         }
@@ -407,10 +455,28 @@ export async function fetchSnippets(
     const snippets: CodeSnippet[] = [];
     const fetchedContent = new Map<string, string>();
 
-    for (const { candidateEntry, selectedFunctions } of selectedFiles) {
+    for (const { candidateEntry, selectedFunctions, zeroFunctionMode } of selectedFiles) {
         if (snippets.length >= MAX_TOTAL_SNIPPETS) break;
 
         const { fileId, source } = candidateEntry;
+
+        // Barrel summary — one cheap line, no content fetch needed.
+        if (zeroFunctionMode === "barrel-summary") {
+            const targets = fileMap.get(fileId)?.barrelTargets ?? [];
+            const list = targets.length > 0 ? targets.slice(0, 12).join(", ") : "(targets unknown)";
+            snippets.push({
+                fileId,
+                functionName: "(barrel)",
+                functionId: `${fileId}::*`,
+                body: `// Barrel / index file — re-exports from: ${list}`,
+                startLine: 1,
+                endLine: 1,
+                selectionReasons: ["barrel re-export summary (cheap; full body only on request)"],
+                candidateSource: source,
+                candidateScore: candidateEntry.score,
+            });
+            continue;
+        }
 
         // Fetch raw file content (once per file, Redis-cached)
         let rawContent = fetchedContent.get(fileId);
@@ -429,7 +495,6 @@ export async function fetchSnippets(
         // ── Zero-function modes: controlled partial fetch ──────────────────
         if (selectedFunctions.length === 0) {
             const lines = rawContent.split("\n");
-            const { zeroFunctionMode } = selectedFiles.find(sf => sf.candidateEntry.fileId === fileId)!;
 
             // Determine how many lines to preview based on mode
             let previewLines: number;
@@ -448,6 +513,10 @@ export async function fetchSnippets(
                     previewLines = Math.min(TEST_PREVIEW_LINES, lines.length);
                     reason = "test file (0 functions parsed — bounded preview, not full suite)";
                     break;
+                case "content-preview":
+                    previewLines = Math.min(CONTENT_PREVIEW_LINES, lines.length);
+                    reason = "definition/schema file (no functions — bounded content preview)";
+                    break;
                 case "pr-no-metadata":
                 default:
                     previewLines = Math.min(80, lines.length);
@@ -456,6 +525,11 @@ export async function fetchSnippets(
             }
 
             const meaningful = stripBoilerplate(lines.join("\n")).split("\n");
+            // Content preview self-filters barrels: nothing left after stripping → drop.
+            if (zeroFunctionMode === "content-preview" && meaningful.join("").trim().length === 0) {
+                console.log(`\x1b[33m[snippetFetcher] ${fileId} empty after stripping (barrel-like) — dropping\x1b[0m`);
+                continue;
+            }
             const body = meaningful.slice(0, previewLines).join("\n")
                 + (meaningful.length > previewLines ? `\n// ... [${meaningful.length - previewLines} more lines omitted] ...` : "");
 
