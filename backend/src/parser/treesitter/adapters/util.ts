@@ -31,6 +31,7 @@ export class FunctionCollector {
         endLine: number;
         isExported: boolean;
         isDeclaration?: boolean;
+        isRecovered?: boolean;
         isAsync?: boolean;
         kind: FunctionKind;
         calls: string[];
@@ -50,16 +51,36 @@ export class FunctionCollector {
             endLine: params.endLine,
             isExported: params.isExported,
             isDeclaration: params.isDeclaration,
+            isRecovered: params.isRecovered,
             isAsync: params.isAsync,
             kind: params.kind,
             parentId: params.parentId,
             calls: params.calls,       // RAW NAMES — builder resolves to IDs
             calledBy: [],
-            analysisConfidence: "medium", // call resolution is name-based for non-TS langs
+            // recovered-from-ERROR nodes are heuristic (text-scanned body); flag low so
+            // the UI badges them rather than implying a clean parse.
+            analysisConfidence: params.isRecovered ? "low" : "medium",
         };
         this.functions.push(fn);
         return fn;
     }
+
+    /** start lines of every function captured so far (for additive-pass dedup). */
+    capturedStartLines(): Set<number> {
+        return new Set(this.functions.map((f) => f.startLine));
+    }
+}
+
+// ── Control-flow keywords that the C/C++ grammar sometimes mis-captures as a
+// function name when a macro-heavy body corrupts the parse (e.g. a stray
+// `switch (...) { }` surfacing as a function_definition named "switch").
+// No real function legitimately has these names, so they're safe to drop.
+const CONTROL_FLOW_NAMES = new Set([
+    "if", "for", "while", "switch", "return", "catch", "else", "do", "sizeof",
+]);
+
+export function isControlFlowName(name: string): boolean {
+    return CONTROL_FLOW_NAMES.has(name);
 }
 
 /** Extract raw call names inside a subtree (callNodeType varies per grammar). */

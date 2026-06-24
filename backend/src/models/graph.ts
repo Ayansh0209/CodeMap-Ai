@@ -61,6 +61,11 @@ export interface FunctionNode {
     isExported: boolean;
     isDeclaration?: boolean;       // true for a prototype/forward declaration with no body
                                    // (C/C++ header prototypes). Drives the "decl" badge.
+    isRecovered?: boolean;         // true when the function was recovered heuristically from
+                                   // an ERROR-trapped region (macro-heavy C/C++ the grammar
+                                   // couldn't parse). Calls/edges are best-effort. Drives the
+                                   // "partial analysis" badge so the UI never shows a
+                                   // misleadingly confident "0 callers" for these.
     isAsync?: boolean;             // whether the function uses async/await
     kind: FunctionKind;
     visibility?: Visibility;       // only set for class methods

@@ -18,7 +18,7 @@
 import type { Node as TSNode } from "web-tree-sitter";
 import { Language, FileKind, StructureNode, FunctionNode } from "../../../models/graph";
 import { LanguageAdapter, ExtractResult, LangRawImport } from "../types";
-import { walk, FunctionCollector, inTestDir, nearestEnclosing, sweepFunctionsOnError } from "./util";
+import { walk, FunctionCollector, inTestDir, nearestEnclosing, sweepFunctionsOnError, isControlFlowName } from "./util";
 
 function calleeName(callee: TSNode): string | null {
     switch (callee.type) {
@@ -59,6 +59,90 @@ function extractCalls(node: TSNode): string[] {
         }
     });
     return [...calls];
+}
+
+// ── Heuristic recovery for ERROR-trapped functions ────────────────────────────
+// Some macro-heavy C/C++ functions defeat the grammar entirely: the signature is
+// stranded in an ERROR node and the body parses as loose statements, so the
+// function is never a `function_definition` node and its callers/callees vanish
+// (nlohmann/json's serializer.hpp is the canonical case). When the parse has
+// errors, we text-scan the broken regions for function signatures and recover
+// name + body calls. Strictly additive — supplements the AST pass, never
+// replaces it — and every recovered node is flagged isRecovered so the UI can
+// badge it instead of implying a clean analysis.
+
+// Signature shape: optional qualifiers, return type, NAME, (params on one line),
+// optional trailing qualifiers / trailing-return / member-init, then `{` (here
+// or on the next non-empty line). Requiring the brace excludes prototypes (`;`)
+// and bare macro invocations. Kept deliberately conservative.
+const SIGNATURE_HEAD_RE =
+    /^[ \t]*(?:(?:static|inline|virtual|constexpr|explicit|friend|extern|JSON_HEDLEY_\w+)\b[ \t]*)*[A-Za-z_][\w:<>,\s*&]*?[ \t*&]+([A-Za-z_]\w*)[ \t]*\([^;{}]*\)[ \t]*(?:const\b[ \t]*)?(?:noexcept[\w() ]*)?(?:->[\w:<>\s*&]+)?[ \t]*(?::[^{;]+)?[ \t]*(\{)?[ \t]*$/;
+
+/** Candidate call names in a chunk of source text (builder discards non-matches). */
+function findCallNamesInText(text: string): string[] {
+    const calls = new Set<string>();
+    const re = /\b([A-Za-z_]\w*)[ \t]*\(/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+        if (!isControlFlowName(m[1])) calls.add(m[1]);
+    }
+    return [...calls];
+}
+
+/**
+ * Brace-match from `openLine0` (0-based) to the line that closes the body,
+ * skipping strings, char literals, and comments so braces inside them don't
+ * skew the count. Returns a 1-based end line, or -1 if unbalanced. Capped so an
+ * unbalanced scan can't walk the rest of a huge file.
+ */
+function findBodyEndLine(lines: string[], openLine0: number): number {
+    let depth = 0;
+    let started = false;
+    let inBlockComment = false;
+    const cap = Math.min(lines.length, openLine0 + 4000);
+    for (let li = openLine0; li < cap; li++) {
+        const line = lines[li];
+        for (let c = 0; c < line.length; c++) {
+            const ch = line[c];
+            const nx = line[c + 1];
+            if (inBlockComment) {
+                if (ch === "*" && nx === "/") { inBlockComment = false; c++; }
+                continue;
+            }
+            if (ch === "/" && nx === "/") break;                 // line comment
+            if (ch === "/" && nx === "*") { inBlockComment = true; c++; continue; }
+            if (ch === '"') {                                     // string literal
+                c++;
+                while (c < line.length && line[c] !== '"') { if (line[c] === "\\") c++; c++; }
+                continue;
+            }
+            if (ch === "'") {                                     // char literal
+                c++;
+                while (c < line.length && line[c] !== "'") { if (line[c] === "\\") c++; c++; }
+                continue;
+            }
+            if (ch === "{") { depth++; started = true; }
+            else if (ch === "}") {
+                depth--;
+                if (started && depth === 0) return li + 1;        // 1-based
+            }
+        }
+    }
+    return -1;
+}
+
+/** lines (0-based) that fall within (or just beside) an ERROR node's span. */
+function errorAffectedLines(root: TSNode): Set<number> {
+    const affected = new Set<number>();
+    walk(root, (n) => {
+        if (n.type === "ERROR") {
+            // small ±2 window absorbs off-by-a-bit placement of the error span
+            const from = Math.max(0, n.startPosition.row - 2);
+            const to = n.endPosition.row + 2;
+            for (let r = from; r <= to; r++) affected.add(r);
+        }
+    });
+    return affected;
 }
 
 /** descend the declarator chain to find the function name */
@@ -273,11 +357,18 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
 
         visit(rootNode, null);
 
-        // ERROR-tolerant fallback: when the parse is too broken for the structured
-        // descent to enter ERROR-wrapped class bodies (e.g. nlohmann/json), sweep
-        // the whole tree so functions aren't silently dropped.
-        if (collector.functions.length === 0 && rootNode.hasError) {
+        // ── ERROR recovery (two additive passes, only when the parse broke) ──────
+        // The structured descent above can't enter ERROR-wrapped regions, so on a
+        // broken parse it silently drops functions. Previously a single all-or-
+        // nothing fallback only fired when ZERO functions were found, missing the
+        // common PARTIAL case (some functions parse, others are ERROR-trapped).
+        if (rootNode.hasError) {
+            // Pass 1 — additive node sweep: recover function_definition nodes the
+            // structured descent missed (e.g. trapped under an ERROR-wrapped class),
+            // skipping any the structured pass already captured (dedup by start line).
+            const seen = collector.capturedStartLines();
             sweepFunctionsOnError(rootNode, new Set(["function_definition"]), (n) => {
+                if (seen.has(n.startPosition.row + 1)) return;
                 const clsNode = nearestEnclosing(n, new Set(["class_specifier", "struct_specifier", "union_specifier"]));
                 const nameNode = clsNode?.childForFieldName("name");
                 const classCtx = nameNode
@@ -285,6 +376,11 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
                     : null;
                 this.handleFunctionDef(n, classCtx, collector, relativePath, testSuites, testCases);
             });
+
+            // Pass 2 — text recovery: functions the grammar failed to even produce
+            // a function_definition for (macro-heavy bodies). Signature is stranded
+            // in an ERROR node; we recover it heuristically from source text.
+            this.recoverErrorTrappedFunctions(rootNode, content, relativePath, collector);
         }
 
         const hasStartupSignals = collector.functions.some((f) => f.name === "main");
@@ -310,6 +406,11 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
         const named = functionNameFromDefinition(def);
         if (!named) return;
 
+        // A corrupt parse (macro-heavy body) sometimes surfaces a control-flow
+        // statement as a function_definition named e.g. "switch" / "if". Drop it —
+        // no real function has these names, and keeping it pollutes the graph.
+        if (isControlFlowName(named.name.split(".").pop() ?? named.name)) return;
+
         let name = named.name;
         let parentId: string | undefined;
 
@@ -333,6 +434,65 @@ abstract class CFamilyAdapterBase implements LanguageAdapter {
             calls: extractCalls(def),
             parentId,
         });
+    }
+
+    /**
+     * Text-based recovery of functions the grammar never produced a
+     * function_definition for (macro-heavy bodies → signature stranded in an
+     * ERROR node, body parsed as loose statements). Only the signature lines that
+     * intersect an ERROR region are considered, so cleanly-parsed code is never
+     * touched. Each recovered function is flagged isRecovered (low confidence).
+     */
+    private recoverErrorTrappedFunctions(
+        root: TSNode,
+        content: string,
+        relativePath: string,
+        collector: FunctionCollector
+    ): void {
+        const affected = errorAffectedLines(root);
+        if (affected.size === 0) return;
+
+        const lines = content.split("\n");
+        const captured = collector.capturedStartLines();
+
+        for (let i = 0; i < lines.length; i++) {
+            if (!affected.has(i)) continue;            // only inside broken regions
+            if (captured.has(i + 1)) continue;         // AST already has this function
+
+            const m = lines[i].match(SIGNATURE_HEAD_RE);
+            if (!m) continue;
+            const name = m[1];
+            if (isControlFlowName(name)) continue;
+
+            // Locate the opening brace: same line, or the next non-empty line.
+            let openLine0 = -1;
+            if (m[2] === "{") {
+                openLine0 = i;
+            } else {
+                for (let j = i + 1; j < Math.min(lines.length, i + 3); j++) {
+                    if (lines[j].trim() === "") continue;
+                    if (lines[j].trim().startsWith("{")) openLine0 = j;
+                    break;
+                }
+            }
+            if (openLine0 === -1) continue;            // no body → prototype/macro, skip
+
+            const endLine = findBodyEndLine(lines, openLine0);
+            if (endLine === -1) continue;              // unbalanced → bail, stay conservative
+
+            const bodyText = lines.slice(i, endLine).join("\n");
+            collector.add({
+                name,
+                startLine: i + 1,
+                endLine,
+                isExported: !/^\s*static\b/.test(lines[i]),
+                isRecovered: true,
+                kind: "function",
+                calls: findCallNamesInText(bodyText),
+            });
+            captured.add(i + 1);
+            i = endLine - 1;                            // skip past this body
+        }
     }
 
     /**
