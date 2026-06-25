@@ -125,64 +125,77 @@ export function useFocusGraph({
       x: centerX, y: centerY, fx: centerX, fy: centerY
     };
 
+    // Tag each node with the column it belongs to so the renderer can place
+    // its label on the correct side (left of the "used by" column, right of
+    // the "imports" column) when we lay things out as columns.
+    leftNodes.forEach(n => (n.side = "left"));
+    rightNodes.forEach(n => (n.side = "right"));
+    centerNode.side = "center";
+
     const nodes = [centerNode, ...leftNodes, ...rightNodes];
     const nodeLookup = new Map(nodes.map(n => [n.id, n]));
 
+    // ── Layout selection ────────────────────────────────────────────────────
+    // The radial fan looks great for a handful of nodes, but craters into an
+    // unreadable wall once a side has many (e.g. a file that imports 30 things:
+    // 30 dots crammed onto a fixed 240px arc => ~18px each => overlapping
+    // labels). So: keep the fan only while a side is small; otherwise use a
+    // clean wrapped column with labels set BESIDE the dots (not stacked under
+    // them), which stays legible at any count. 2-hop / all always use columns.
+    // Auto-fit zoom (added after render) then frames whatever we produce.
     const isTree = focusDepth === 2 || focusDepth === "all";
+    const ARC_MAX = 12;
+    const useColumns = isTree || leftNodes.length > ARC_MAX || rightNodes.length > ARC_MAX;
 
-    const applyLayout = () => {
-      if (!isTree) {
-        const layoutSemi = (colNodes: SimNode[], isLeft: boolean) => {
-          const byHop = d3.groups(colNodes, n => n.hop || 1);
-          byHop.forEach(([hop, hopNodes]) => {
-            const radius = 240 * hop;
-            const angleSpan = Math.PI * 0.7;
-            const startAngle = isLeft ? Math.PI - angleSpan / 2 : -angleSpan / 2;
-            const step = hopNodes.length > 1 ? angleSpan / (hopNodes.length - 1) : 0;
-            hopNodes.sort((a, b) => (b.importance || 0) - (a.importance || 0)).forEach((n, i) => {
-              const angle = startAngle + i * step;
-              n.x = centerX + radius * Math.cos(angle);
-              n.y = centerY + radius * Math.sin(angle);
-            });
-          });
-        };
-        layoutSemi(leftNodes, true);
-        layoutSemi(rightNodes, false);
-      } else {
-        // Readability: min 36px row spacing (was 22 — labels overlapped into
-        // an unreadable wall) and giant hops wrap into multiple sub-columns
-        // instead of one endless line.
-        const MAX_PER_COLUMN = 22;
-        const SUB_COLUMN_GAP = 170;
-        const layoutTree = (colNodes: SimNode[], isLeft: boolean) => {
-          const byHop = d3.groups(colNodes, n => n.hop || 1);
-          // horizontal room each hop needs = its own sub-columns
-          let xOffset = 0;
-          byHop.sort((a, b) => a[0] - b[0]).forEach(([_hop, hopNodes]) => {
-            const subCols = Math.ceil(hopNodes.length / MAX_PER_COLUMN);
-            const baseX = isLeft
-              ? centerX - 220 - xOffset
-              : centerX + 220 + xOffset;
-
-            const sorted = hopNodes.sort((a, b) => (b.importance || 0) - (a.importance || 0));
-            sorted.forEach((n, i) => {
-              const col = Math.floor(i / MAX_PER_COLUMN);
-              const row = i % MAX_PER_COLUMN;
-              const rowsInCol = Math.min(MAX_PER_COLUMN, hopNodes.length - col * MAX_PER_COLUMN);
-              const vSpacing = Math.max(36, Math.min(56, 800 / rowsInCol));
-              const startY = centerY - ((rowsInCol - 1) * vSpacing) / 2;
-              n.x = baseX + (isLeft ? -1 : 1) * col * SUB_COLUMN_GAP;
-              n.y = startY + row * vSpacing;
-            });
-
-            xOffset += subCols * SUB_COLUMN_GAP + 40;
-          });
-        };
-        layoutTree(leftNodes, true);
-        layoutTree(rightNodes, false);
-      }
+    const layoutSemi = (colNodes: SimNode[], isLeft: boolean) => {
+      const byHop = d3.groups(colNodes, n => n.hop || 1);
+      byHop.forEach(([hop, hopNodes]) => {
+        const count = hopNodes.length;
+        const angleSpan = Math.PI * 0.7;
+        // Grow the radius so each node always keeps >=48px of arc length —
+        // the fan can never cram, it just gets wider.
+        const minArc = 48;
+        const radius = Math.max(240 * hop, count > 1 ? (count * minArc) / angleSpan : 0);
+        const startAngle = isLeft ? Math.PI - angleSpan / 2 : -angleSpan / 2;
+        const step = count > 1 ? angleSpan / (count - 1) : 0;
+        hopNodes.sort((a, b) => (b.importance || 0) - (a.importance || 0)).forEach((node, i) => {
+          const angle = startAngle + i * step;
+          node.x = centerX + radius * Math.cos(angle);
+          node.y = centerY + radius * Math.sin(angle);
+        });
+      });
     };
-    applyLayout();
+
+    const layoutColumns = (colNodes: SimNode[], isLeft: boolean) => {
+      const dir = isLeft ? -1 : 1;
+      const ROW_H = 30;            // labels sit beside the dot, so rows pack tight
+      const COL_GAP = 210;        // gap between wrapped sub-columns / hops
+      const usableH = Math.max(240, height - 120);
+      const rowsPerCol = Math.max(6, Math.floor(usableH / ROW_H));
+      const byHop = d3.groups(colNodes, n => n.hop || 1).sort((a, b) => a[0] - b[0]);
+      let xOffset = 200;          // first column sits 200px out from center
+      byHop.forEach(([_hop, hopNodes]) => {
+        const sorted = hopNodes.sort((a, b) => (b.importance || 0) - (a.importance || 0));
+        const subCols = Math.ceil(sorted.length / rowsPerCol);
+        sorted.forEach((node, i) => {
+          const col = Math.floor(i / rowsPerCol);
+          const row = i % rowsPerCol;
+          const rowsInCol = Math.min(rowsPerCol, sorted.length - col * rowsPerCol);
+          const startY = centerY - ((rowsInCol - 1) * ROW_H) / 2;
+          node.x = centerX + dir * (xOffset + col * COL_GAP);
+          node.y = startY + row * ROW_H;
+        });
+        xOffset += subCols * COL_GAP + 40;
+      });
+    };
+
+    if (useColumns) {
+      layoutColumns(leftNodes, true);
+      layoutColumns(rightNodes, false);
+    } else {
+      layoutSemi(leftNodes, true);
+      layoutSemi(rightNodes, false);
+    }
 
     const svg = d3.select(container).append("svg").attr("width", "100%").attr("height", "100%").attr("viewBox", `0 0 ${width} ${height}`).style("opacity", "0");
     svgRef.current = svg;
@@ -193,7 +206,23 @@ export function useFocusGraph({
 
     const g = svg.append("g");
     gRef.current = g;
-    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 8]).on("zoom", ev => g.attr("transform", ev.transform));
+
+    // When zoomed far out, hundreds of labels become noise — keep only the
+    // high-signal ones (focus node, core files, folder groups) visible; the
+    // rest reveal on hover. Above the threshold, show everything.
+    const LABEL_K = 0.5;
+    const applyLabelDeclutter = (k: number) => {
+      g.selectAll<SVGGElement, SimNode>("g.focus-label").style("display", (d) =>
+        !d || k >= LABEL_K || d.id === focusedNodeId || d.isGroup || representativeFilesSet.has(d.id)
+          ? null
+          : "none"
+      );
+    };
+
+    const zoom = d3.zoom<SVGSVGElement, unknown>().scaleExtent([0.1, 8]).on("zoom", ev => {
+      g.attr("transform", ev.transform);
+      applyLabelDeclutter(ev.transform.k);
+    });
     svg.call(zoom);
 
     const links: SimLink[] = [];
@@ -284,11 +313,24 @@ export function useFocusGraph({
       if (d.isGroup) g2.append("text").attr("text-anchor", "middle").attr("dy", "0.35em").attr("fill", "#8b949e").attr("font-size", "9px").attr("font-weight", "bold").text("📁");
 
       const labelText = d.isGroup ? `/${d.data.label} (${d.childCount})` : d.data.label;
-      const label = g2.append("g").attr("transform", `translate(0, ${r + 20})`);
-      label.append("text").attr("text-anchor", "middle")
+      // In column mode the label sits BESIDE the dot (left of the used-by
+      // column, right of the imports column) so rows can pack tightly without
+      // the label-under-dot stacking that made dense fans unreadable. In fan
+      // mode it stays centered under the dot.
+      const sideLabel = useColumns && d.side != null && d.side !== "center";
+      let anchor: "start" | "middle" | "end" = "middle";
+      let lx = 0;
+      let ly = r + 20;
+      if (sideLabel) {
+        ly = 0;
+        if (d.side === "left") { anchor = "end"; lx = -(r + 8); }
+        else { anchor = "start"; lx = r + 8; }
+      }
+      const label = g2.append("g").attr("class", "focus-label").attr("transform", `translate(${lx}, ${ly})`);
+      label.append("text").attr("text-anchor", anchor).attr("dy", "0.35em")
         .attr("fill", isFocused ? "#f0883e" : "#e6edf3").attr("font-size", r > 10 ? "12px" : "10px").attr("font-family", "monospace")
         .attr("opacity", isSearchMatch ? hopOpacity : 0.1)
-        .text(trunc(labelText, isTree ? 25 : 20));
+        .text(trunc(labelText, useColumns ? 26 : 20));
     });
 
     nodeG.on("mouseover", function (ev, d) {
@@ -299,6 +341,9 @@ export function useFocusGraph({
         const tid = typeof l.target === "string" ? l.target : (l.target as any).id;
         if (sid === d.id) neighborhood.add(tid); if (tid === d.id) neighborhood.add(sid);
       });
+      // Reveal labels for the hovered node's neighborhood (so a decluttered
+      // dense view becomes readable on hover) and mute the rest.
+      g.selectAll<SVGGElement, SimNode>("g.focus-label").style("display", n => neighborhood.has(n.id) ? null : "none");
       nodeG.transition().duration(120).style("opacity", n => neighborhood.has(n.id) ? 1 : 0.08);
       link.transition().duration(120).attr("stroke-opacity", l => {
         const sid = typeof l.source === "string" ? l.source : (l.source as any).id;
@@ -311,6 +356,8 @@ export function useFocusGraph({
       });
     }).on("mouseout", function () {
       tooltip.style("opacity", "0");
+      // Restore the zoom-appropriate label set (hover may have hidden some).
+      applyLabelDeclutter(d3.zoomTransform(svg.node() as SVGSVGElement).k);
       nodeG.transition().duration(120).style("opacity", 1);
       link.transition().duration(120).attr("stroke-opacity", l => {
         const s = nodeLookup.get(typeof l.source === "string" ? l.source : (l.source as any).id)!;
@@ -323,7 +370,29 @@ export function useFocusGraph({
       else { onFileClickRef.current(d.data); if (d.id !== focusedNodeId) { setFocusedNodeId(d.id); setFocusDepth(1); } }
     });
 
-    svg.transition().duration(300).style("opacity", "1");
-    return () => { simulationRef.current?.stop(); };
-  }, [focusedNodeId, files, edges, focusDepth, focusSearch, expandedFolders]); 
+    // Named transition ("fade") so the auto-fit zoom below — a separate
+    // transition on the same <svg> — can't interrupt it. Unnamed d3
+    // transitions share one slot per element and cancel each other, which
+    // froze this fade at ~0.2 opacity (the whole graph rendered dim).
+    svg.transition("fade").duration(300).style("opacity", "1");
+
+    // Auto-fit: frame the whole layout in the viewport. Without this the view
+    // stayed at scale 1, so big fans/columns either spilled off-screen or piled
+    // up in the middle. Runs after a tick so getBBox sees the rendered nodes.
+    const fitTimer = setTimeout(() => {
+      if (!containerRef.current) return;
+      const bbox = (g.node() as SVGGElement | null)?.getBBox();
+      if (bbox && bbox.width > 0 && bbox.height > 0) {
+        const margin = 1.12;
+        const k = Math.min(1.2, 0.92 / Math.max((bbox.width * margin) / width, (bbox.height * margin) / height));
+        const tx = width / 2 - (bbox.x + bbox.width / 2) * k;
+        const ty = height / 2 - (bbox.y + bbox.height / 2) * k;
+        svg.transition("fit").duration(450).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(k));
+      } else {
+        applyLabelDeclutter(1);
+      }
+    }, 60);
+
+    return () => { clearTimeout(fitTimer); simulationRef.current?.stop(); };
+  }, [focusedNodeId, files, edges, focusDepth, focusSearch, expandedFolders]);
 }
