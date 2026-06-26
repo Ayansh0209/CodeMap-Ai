@@ -45,8 +45,8 @@ export default function Navbar({ owner, repo, onAnalyzeAnother }: NavbarProps) {
         </div>
         <span className="text-sm font-bold" style={{ color: "#e6edf3" }}>
           <span>Code</span>
-          <span style={{ color: "#6366f1" }}>Map</span>
-          <span className="text-xs font-medium ml-0.5" style={{ color: "#a78bfa" }}>AI</span>
+          <span style={{ color: "#fb7a3c" }}>Map</span>
+          <span className="text-xs font-medium ml-0.5" style={{ color: "#ec4899" }}>AI</span>
         </span>
       </div>
 

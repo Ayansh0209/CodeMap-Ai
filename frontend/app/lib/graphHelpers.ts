@@ -79,6 +79,7 @@ const KIND_BADGES: Record<string, string> = {
   utility: "util",
   callback: "cb",
   "context-provider": "ctx",
+  structure: "struct",
   unknown: "fn",
 };
 

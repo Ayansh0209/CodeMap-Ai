@@ -6,6 +6,7 @@ import type {
   FunctionNodeDTO,
   FunctionFilePayload,
   IssueMapResult,
+  StructureNodeDTO,
 } from "../lib/types";
 import {
   makeGitHubFileLink,
@@ -26,6 +27,9 @@ interface DetailsPanelProps {
   onClose: () => void;
   onFileNavigate: (fileId: string) => void;
   onFunctionClick: (fn: FunctionNodeDTO) => void;
+  // Loading state for THIS file's (lazy-loaded) functions: "loading" while the
+  // analysis is still writing them in the background, "error" if the fetch failed.
+  functionsStatus?: "loading" | "error";
   issueResult?: IssueMapResult | null;
   // Code viewer
   codeContent?: string | null;
@@ -52,6 +56,7 @@ export default function DetailsPanel({
   onClose,
   onFileNavigate,
   onFunctionClick,
+  functionsStatus,
   issueResult,
   codeContent,
   onViewSource,
@@ -77,6 +82,34 @@ export default function DetailsPanel({
   const sanitizedId = sanitizeFileId(file.id);
   const functionData = functionFiles?.[sanitizedId] ?? null;
   const functions = functionData?.functions ?? [];
+
+  // A structure (class / type / table / interface) has no call edges of its
+  // own, but it CAN be referenced by functions. Convert it to a function-shaped
+  // node so clicking it opens the same drill-down view as a function (previously
+  // structures were dead — only functions were clickable). "Used by" is resolved
+  // best-effort from the call graph; calls is empty since structures don't call.
+  const openStructure = (s: StructureNodeDTO) => {
+    const calledBy: string[] = [];
+    if (functionFiles) {
+      for (const payload of Object.values(functionFiles)) {
+        for (const fn of payload.functions) {
+          if (fn.calls.includes(s.id)) calledBy.push(fn.id);
+        }
+      }
+    }
+    onFunctionClick({
+      id: s.id,
+      name: s.name,
+      filePath: s.filePath,
+      startLine: s.startLine,
+      endLine: s.endLine,
+      isExported: s.isExported,
+      kind: "structure",
+      calls: [],
+      calledBy,
+      analysisConfidence: "medium",
+    });
+  };
 
   // ── Issue context for this file ─────────────────────────────────────────
   const fileIssueHit = issueResult?.affectedFiles.find(f => f.fileId === file.id) ?? null;
@@ -299,6 +332,33 @@ export default function DetailsPanel({
             <EmptyMessage>
               Function data unavailable — file was too large for full parse
             </EmptyMessage>
+          ) : functions.length === 0 && functionsStatus === "loading" ? (
+            <div
+              className="rounded-lg p-4 flex flex-col items-center text-center gap-2"
+              style={{ background: "#0d1117", border: "1px dashed #30363d" }}
+            >
+              <span
+                className="inline-block w-5 h-5 border-2 rounded-full animate-spin"
+                style={{ borderColor: "rgba(240,136,62,0.25)", borderTopColor: "#f0883e" }}
+              />
+              <div className="text-xs font-medium" style={{ color: "#e6edf3" }}>
+                Indexing functions…
+              </div>
+              <div className="text-[11px]" style={{ color: "#8b949e" }}>
+                The graph loads first; this file&apos;s functions are still being
+                prepared in the background. One moment.
+              </div>
+            </div>
+          ) : functions.length === 0 && functionsStatus === "error" ? (
+            <div
+              className="rounded-lg p-3 text-xs"
+              style={{ background: "rgba(248,81,73,0.06)", border: "1px solid rgba(248,81,73,0.3)" }}
+            >
+              <div className="font-medium" style={{ color: "#f85149" }}>Couldn&apos;t load functions</div>
+              <div className="mt-0.5" style={{ color: "#8b949e" }}>
+                Something went wrong fetching this file&apos;s functions. Click the file again to retry.
+              </div>
+            </div>
           ) : functions.length === 0 && (!file.structures || file.structures.length === 0) ? (
             <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: "#0d1117", border: "1px dashed #30363d" }}>
               <div style={{ color: "#8b949e" }}>No functions or structures detected in this file.</div>
@@ -317,9 +377,9 @@ export default function DetailsPanel({
               className="space-y-1 overflow-y-auto pr-1"
               style={{ maxHeight: "300px" }}
             >
-              {functions.map((fn) => (
+              {functions.map((fn, i) => (
                 <button
-                  key={fn.id}
+                  key={`${fn.id}@${fn.startLine}#${i}`}
                   className="w-full text-left py-2 px-2.5 rounded-lg transition-colors flex items-center gap-2"
                   style={{
                     background: "transparent",
@@ -391,11 +451,15 @@ export default function DetailsPanel({
           <section>
             <SectionHeader>Structures ({file.structures.length})</SectionHeader>
             <div className="space-y-1 overflow-y-auto pr-1" style={{ maxHeight: "200px" }}>
-              {file.structures.map((s) => (
-                <div
-                  key={s.id}
-                  className="w-full text-left py-2 px-2.5 rounded-lg flex items-center gap-2 group transition-colors"
+              {file.structures.map((s, i) => (
+                <button
+                  key={`${s.id}#${i}`}
+                  onClick={() => openStructure(s)}
+                  title={`Open ${s.name}`}
+                  className="w-full text-left py-2 px-2.5 rounded-lg flex items-center gap-2 group transition-colors cursor-pointer"
                   style={{ background: "rgba(30,35,41,0.5)", border: "1px solid #30363d" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(56,139,253,0.12)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(56,139,253,0.4)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(30,35,41,0.5)"; (e.currentTarget as HTMLElement).style.borderColor = "#30363d"; }}
                 >
                   <span
                     className="text-xs truncate flex-1"
@@ -409,14 +473,17 @@ export default function DetailsPanel({
                   <span
                     className="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0"
                     style={{
-                      background: "rgba(139,148,158,0.1)",
-                      color: "#8b949e",
+                      background: s.kind === "interface" ? "rgba(121,192,255,0.12)" : s.kind === "type" ? "rgba(210,168,255,0.12)" : "rgba(139,148,158,0.1)",
+                      color: s.kind === "interface" ? "#79c0ff" : s.kind === "type" ? "#d2a8ff" : "#8b949e",
                       border: "1px solid #30363d"
                     }}
                   >
-                    STRUCTURE
+                    {s.kind === "interface" ? "interface" : s.kind === "type" ? "type" : "structure"}
                   </span>
-                </div>
+                  <svg className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
               ))}
             </div>
           </section>

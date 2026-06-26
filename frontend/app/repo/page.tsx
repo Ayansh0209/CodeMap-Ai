@@ -133,6 +133,8 @@ function RepoPageContent() {
   // ── Core data ───────────────────────────────────────────────────────────────
   const fileGraph = result?._inlineFileGraph ?? null;
   const [fetchedFunctions, setFetchedFunctions] = useState<Record<string, FunctionFilePayload>>({});
+  // Per-file lazy-load state for the (background-stored) function artifacts.
+  const [fnStatus, setFnStatus] = useState<Record<string, "loading" | "ready" | "error">>({});
 
   const functionFiles: Record<string, FunctionFilePayload> = useMemo(() => {
     const base = result?._functionFiles ?? {};
@@ -451,6 +453,30 @@ function RepoPageContent() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
+  // Lazy-load a file's functions. The graph is shown before every per-file
+  // function artifact is written, so a "miss" can mean "still being stored":
+  // the backend tells us via source==="indexing" and we retry (bounded) while
+  // showing a loader, instead of falsely reporting "no functions".
+  const loadFunctions = useCallback((fileId: string, attempt = 0) => {
+    if (!result?.commitSha) return;
+    const sid = sanitizeFileId(fileId);
+    setFnStatus(prev => ({ ...prev, [fileId]: "loading" }));
+    fetchFileFunctions(owner, repo, result.commitSha, fileId)
+      .then(payload => {
+        const empty = !payload.functions || payload.functions.length === 0;
+        if (empty && payload.source === "indexing" && attempt < 15) {
+          setTimeout(() => loadFunctions(fileId, attempt + 1), 1400);
+          return;
+        }
+        setFetchedFunctions(prev => ({ ...prev, [fileId]: payload, [sid]: payload }));
+        setFnStatus(prev => ({ ...prev, [fileId]: "ready" }));
+      })
+      .catch(err => {
+        console.warn('[repo] Failed to fetch functions for', fileId, err);
+        setFnStatus(prev => ({ ...prev, [fileId]: "error" }));
+      });
+  }, [owner, repo, result]);
+
   const handleFileClick = useCallback((file: FileNodeDTO | null) => {
     if (!file) {
       setSelectedFile(null);
@@ -464,18 +490,14 @@ function RepoPageContent() {
     // Lazy fetch functions if not already available
     const sid = sanitizeFileId(file.id);
     const hasFunctions = (result?._functionFiles && result._functionFiles[sid]) || fetchedFunctions[file.id] || fetchedFunctions[sid];
-    
+
     if (!hasFunctions && result?.commitSha) {
-      fetchFileFunctions(owner, repo, result.commitSha, file.id)
-        .then(payload => {
-          setFetchedFunctions(prev => ({ ...prev, [file.id]: payload, [sid]: payload }));
-        })
-        .catch(err => console.warn('[repo] Failed to fetch functions for', file.id, err));
+      loadFunctions(file.id);
     }
 
     // Push history: navigated to a file
     pushHistory({ view: "file-graph", fileId: file.id, fnId: null, fnName: null });
-  }, [pushHistory, result, fetchedFunctions, owner, repo]);
+  }, [pushHistory, result, fetchedFunctions, loadFunctions]);
 
   const handleFileNavigate = useCallback((fileId: string) => {
     if (!fileGraph) return;
@@ -487,16 +509,12 @@ function RepoPageContent() {
 
       const hasFunctions = (result?._functionFiles && result._functionFiles[file.id]) || fetchedFunctions[file.id];
       if (!hasFunctions && result?.commitSha) {
-        fetchFileFunctions(owner, repo, result.commitSha, file.id)
-          .then(payload => {
-            setFetchedFunctions(prev => ({ ...prev, [file.id]: payload }));
-          })
-          .catch(err => console.warn('[repo] Failed to fetch functions for', file.id, err));
+        loadFunctions(file.id);
       }
 
       pushHistory({ view: "file-graph", fileId: file.id, fnId: null, fnName: null });
     }
-  }, [fileGraph, pushHistory, result, fetchedFunctions, owner, repo]);
+  }, [fileGraph, pushHistory, result, fetchedFunctions, loadFunctions]);
 
   const handleFunctionClick = useCallback((fn: FunctionNodeDTO) => {
     setSelectedFunction(fn);
@@ -647,9 +665,9 @@ function RepoPageContent() {
   // ── Loading / redirect state ──────────────────────────────────────────────
   if (!loaded || !fileGraph) {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ background: "#0a0a0f" }}>
+      <div className="flex items-center justify-center h-screen" style={{ background: "#0c0a0a" }}>
         <div className="flex items-center gap-3">
-          <span className="inline-block w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#6366f1", borderTopColor: "transparent" }} />
+          <span className="inline-block w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#fb7a3c", borderTopColor: "transparent" }} />
           <span className="text-sm" style={{ color: "#8b949e" }}>Loading graph...</span>
         </div>
       </div>
@@ -761,6 +779,13 @@ function RepoPageContent() {
                     onFunctionNavigate={handleFunctionNavigate}
                     onBackToFileGraph={handleBackToFileGraph}
                     onBackToFile={handleBackToFile}
+                    importedByFiles={
+                      fileGraph
+                        ? fileGraph.importEdges
+                            .filter((e) => e.target === selectedFunction.filePath)
+                            .map((e) => e.source)
+                        : []
+                    }
                   />
                 ) : (
                   <div
@@ -833,6 +858,11 @@ function RepoPageContent() {
                   onClose={() => setSelectedFile(null)}
                   onFileNavigate={handleFileNavigate}
                   onFunctionClick={handleFunctionClick}
+                  functionsStatus={
+                    selectedFile && fnStatus[selectedFile.id] !== "ready"
+                      ? (fnStatus[selectedFile.id] as "loading" | "error" | undefined)
+                      : undefined
+                  }
                   issueResult={issueResult}
                   codeContent={codeViewerFileId === selectedFile.id ? codeContent : null}
                   onViewSource={handleViewSource}

@@ -158,8 +158,8 @@ function StreamingIndicator({ phase }: { phase: number }) {
       <div
         className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px]"
         style={{
-          background: "rgba(99,102,241,0.08)",
-          border: "1px solid rgba(99,102,241,0.2)",
+          background: "rgba(251,122,60,0.08)",
+          border: "1px solid rgba(251,122,60,0.2)",
           color: "#e6edf3",
         }}
       >
@@ -274,12 +274,14 @@ export default function AIChatTab({
                 try {
                   const content = JSON.parse(dataStr);
                   setMessages((prev) => {
-                    const newMessages = [...prev];
-                    const last = newMessages[newMessages.length - 1];
+                    const last = prev[prev.length - 1];
                     if (last && last.role === "assistant") {
-                      last.content += content;
+                      return [
+                        ...prev.slice(0, -1),
+                        { ...last, content: last.content + content },
+                      ];
                     }
-                    return newMessages;
+                    return prev;
                   });
                 } catch (e) { /* ignore partial JSON */ }
               }
@@ -317,14 +319,14 @@ export default function AIChatTab({
           <div className="flex flex-col items-center justify-center text-center py-8">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center mb-3"
-              style={{ background: "linear-gradient(135deg, rgba(99,102,241,0.15), rgba(168,85,247,0.15))", border: "1px solid rgba(99,102,241,0.2)" }}
+              style={{ background: "linear-gradient(135deg, rgba(251,122,60,0.15), rgba(236,72,153,0.15))", border: "1px solid rgba(251,122,60,0.2)" }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#818cf8" strokeWidth="1.5">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fd9a63" strokeWidth="1.5">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </div>
             <p className="text-sm font-medium mb-1" style={{ color: "#e6edf3" }}>
-              Ask about <span style={{ color: "#818cf8" }}>{fileName}</span>
+              Ask about <span style={{ color: "#fd9a63" }}>{fileName}</span>
             </p>
             <p className="text-xs mb-4" style={{ color: "#484f58" }}>
               Context includes this file and the related issue.
@@ -358,8 +360,8 @@ export default function AIChatTab({
               <div
                 className="max-w-[88%] rounded-xl rounded-br-sm px-3 py-2 text-[13px]"
                 style={{
-                  background: "rgba(99,102,241,0.1)",
-                  border: "1px solid rgba(99,102,241,0.2)",
+                  background: "rgba(251,122,60,0.1)",
+                  border: "1px solid rgba(251,122,60,0.2)",
                   color: "#e6edf3",
                 }}
               >
@@ -419,7 +421,7 @@ export default function AIChatTab({
               type="submit"
               disabled={!input.trim() || isLoading}
               className="shrink-0 w-7 h-7 rounded-md flex items-center justify-center transition-all disabled:opacity-30"
-              style={{ background: input.trim() ? "#6366f1" : "#21262d", color: "#fff" }}
+              style={{ background: input.trim() ? "#fb7a3c" : "#21262d", color: "#fff" }}
             >
               {isLoading ? (
                 <span
