@@ -185,7 +185,7 @@ export default function FunctionGraph({
                 <UsedByPanel
                   heading="Structure, not a function"
                   color="#f0883e"
-                  note={`${selectedFunction.name} is an exported value — a router, schema, table, or config. It's referenced where it's imported, not "called".`}
+                  note={`${selectedFunction.name} is ${selectedFunction.isExported ? "an exported value" : "a top-level value"} — a router, schema, table, or config. It's referenced where it's used, not "called".`}
                   files={importedByFiles}
                 />
               ) : selectedFunction.isRecovered ? (
