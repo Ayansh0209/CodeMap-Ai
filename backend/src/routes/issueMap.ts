@@ -26,7 +26,7 @@
 
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { redisConnection } from "../queue/jobQueue";
+import { jobQueue, redisConnection } from "../queue/jobQueue";
 import { getFileGraph } from "../storage/artifactStore";
 import {
     fetchIssue,
@@ -44,6 +44,22 @@ import { buildChatContext } from "../parser/chatContextBuilder";
 import { rateLimiter, getClientIdentifier, getDateString } from "../middleware/rateLimiter";
 
 const router = Router();
+
+/**
+ * Is this repo's analysis job still running? Used by the issue mapper to ask the
+ * client to wait (rather than run a degraded mapping) when the RetrievalIndex
+ * isn't built yet.
+ */
+async function isAnalysisActive(owner: string, repo: string): Promise<boolean> {
+    try {
+        const job = await jobQueue.getJob(`${owner}--${repo}`.toLowerCase());
+        if (!job) return false;
+        const state = await job.getState();
+        return state === "active" || state === "waiting" || state === "delayed" || state === "prioritized";
+    } catch {
+        return false;
+    }
+}
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 // These are kept exactly as-is — the frontend depends on these shapes.
@@ -184,6 +200,28 @@ router.post("/map", async (req: Request, res: Response, next: NextFunction) => {
             }
         } catch {
             console.warn("[issueMap] Redis unavailable for cache check — running pipeline");
+        }
+
+        // ── Step 2.5: "Not ready yet" guard ───────────────────────────────────
+        // The issue mapper runs on the RetrievalIndex, which is built from the
+        // COMPLETE function graph at the end of analysis — it's all-or-nothing,
+        // never half-built. The normal flow can't reach here before it's stored
+        // (the UI only loads after the "ready" signal, which fires AFTER the
+        // index is written). But if the index is missing AND the analysis job is
+        // still running (e.g. re-analysis, or someone opening the repo URL
+        // directly mid-analysis), ask the client to wait instead of mapping on
+        // an incomplete graph.
+        try {
+            const hasRetrieval = await redisConnection.exists(`retrieval:${owner}:${repo}`);
+            if (!hasRetrieval && await isAnalysisActive(owner, repo)) {
+                console.log(`[issueMap] retrieval index not ready (analysis active) — asking client to retry: ${owner}/${repo}`);
+                return res.status(409).json({
+                    error: "Analysis is still finishing — the issue mapper will be ready in a few seconds. Please try again.",
+                    preparing: true,
+                });
+            }
+        } catch {
+            // Redis/queue unavailable — fall through; the pipeline degrades safely.
         }
 
         // ── Step 3: Fetch issue from GitHub ───────────────────────────────────

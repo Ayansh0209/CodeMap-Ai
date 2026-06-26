@@ -88,6 +88,9 @@ export interface StructureNode {
     startLine: number;
     endLine: number;
     isExported: boolean;
+    // "value"  = const/registration created at runtime (e.g. pgTable(), z.object())
+    // "interface" / "type" = TypeScript contract (exported interface / type alias)
+    kind?: "value" | "interface" | "type";
 }
 
 export interface FileNode {

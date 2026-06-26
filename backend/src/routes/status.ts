@@ -43,6 +43,14 @@ router.get("/:jobId", async (req: Request, res: Response, next: NextFunction) =>
                 // progress is { percent, step } (object form survives the
                 // sandboxed-processor boundary; job.updateData does not)
                 const p = job.progress as any;
+                // The worker can mark the graph "ready" — handing over the result
+                // via progress — before the job fully completes; it keeps writing
+                // the lazy-loaded per-file function artifacts afterwards. Surface
+                // that as "done" so the UI renders the graph without waiting on
+                // the remaining storage.
+                if (p && typeof p === "object" && p.ready && p.result) {
+                    return res.json({ status: "done", ...(p.result as object) });
+                }
                 const percent = typeof p === "number" ? p : (p?.percent ?? 0);
                 const step = typeof p === "object" && p?.step ? p.step : "processing";
                 return res.json({
