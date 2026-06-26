@@ -181,28 +181,22 @@ export default function FunctionGraph({
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {callers.length === 0 ? (
-              selectedFunction.isRecovered ? (
+              selectedFunction.kind === "structure" ? (
+                <UsedByPanel
+                  heading="Structure, not a function"
+                  color="#f0883e"
+                  note={`${selectedFunction.name} is an exported value — a router, schema, table, or config. It's referenced where it's imported, not "called".`}
+                  files={importedByFiles}
+                />
+              ) : selectedFunction.isRecovered ? (
                 <EmptyState>Caller analysis incomplete — this file couldn&apos;t be fully parsed</EmptyState>
               ) : selectedFunction.isExported && importedByFiles.length > 0 ? (
-                <div className="rounded-lg p-3 text-xs space-y-2" style={{ background: "rgba(63,185,80,0.06)", border: "1px solid rgba(63,185,80,0.25)" }}>
-                  <div className="flex items-center gap-1.5 font-semibold" style={{ color: "#3fb950" }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
-                    Exported · used by {importedByFiles.length} file{importedByFiles.length > 1 ? "s" : ""}
-                  </div>
-                  <div className="text-[11px] leading-relaxed" style={{ color: "#8b949e" }}>
-                    No tracked function calls it directly — it&apos;s imported and used as a value (a plugin, callback, or re-export). Changing it can still affect these files:
-                  </div>
-                  <div className="space-y-0.5">
-                    {importedByFiles.slice(0, 6).map((f) => (
-                      <div key={f} className="font-mono text-[11px] truncate" style={{ color: "#79c0ff" }} title={f}>
-                        {f.split("/").pop()} <span style={{ color: "#484f58" }}>· {f}</span>
-                      </div>
-                    ))}
-                    {importedByFiles.length > 6 && (
-                      <div className="text-[10px]" style={{ color: "#484f58" }}>+{importedByFiles.length - 6} more</div>
-                    )}
-                  </div>
-                </div>
+                <UsedByPanel
+                  heading={`Exported · used by ${importedByFiles.length} file${importedByFiles.length > 1 ? "s" : ""}`}
+                  color="#3fb950"
+                  note="No tracked function calls it directly — it's imported and used as a value (a plugin, callback, or re-export). Changing it can still affect these files:"
+                  files={importedByFiles}
+                />
               ) : (
                 <EmptyState>Not called by any tracked function</EmptyState>
               )
@@ -431,11 +425,19 @@ export default function FunctionGraph({
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {callees.length === 0 ? (
-              <EmptyState>
-                {selectedFunction.isRecovered
-                  ? "Callee analysis incomplete — this file couldn't be fully parsed"
-                  : "Does not call any tracked functions"}
-              </EmptyState>
+              selectedFunction.kind === "structure" ? (
+                <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(240,136,62,0.06)", border: "1px solid rgba(240,136,62,0.2)" }}>
+                  <div className="text-[11px] leading-relaxed" style={{ color: "#8b949e" }}>
+                    A structure groups values — its internals aren&apos;t tracked as a call graph.
+                  </div>
+                </div>
+              ) : (
+                <EmptyState>
+                  {selectedFunction.isRecovered
+                    ? "Callee analysis incomplete — this file couldn't be fully parsed"
+                    : "Does not call any tracked functions"}
+                </EmptyState>
+              )
             ) : (
               displayedCallees.map((fn, i) => (
                 <FunctionCard
@@ -572,6 +574,41 @@ function EmptyState({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// Honest "this isn't called, but it IS used" panel — for exported functions used
+// as values, and for structures (routers/schemas/configs) where the call-graph
+// framing doesn't apply.
+function UsedByPanel({
+  heading,
+  color,
+  note,
+  files,
+}: {
+  heading: string;
+  color: string;
+  note: string;
+  files: string[];
+}) {
+  return (
+    <div className="rounded-lg p-3 text-xs space-y-2" style={{ background: `${color}10`, border: `1px solid ${color}40` }}>
+      <div className="flex items-center gap-1.5 font-semibold" style={{ color }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+        {heading}
+      </div>
+      <div className="text-[11px] leading-relaxed" style={{ color: "#8b949e" }}>{note}</div>
+      {files.length > 0 && (
+        <div className="space-y-0.5">
+          {files.slice(0, 6).map((f) => (
+            <div key={f} className="font-mono text-[11px] truncate" style={{ color: "#79c0ff" }} title={f}>
+              {f.split("/").pop()} <span style={{ color: "#484f58" }}>· {f}</span>
+            </div>
+          ))}
+          {files.length > 6 && <div className="text-[10px]" style={{ color: "#484f58" }}>+{files.length - 6} more</div>}
+        </div>
+      )}
     </div>
   );
 }
