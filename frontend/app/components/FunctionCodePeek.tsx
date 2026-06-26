@@ -33,8 +33,18 @@ export default function FunctionCodePeek({
 
   useEffect(() => {
     let cancelled = false;
-    const slice = (content: string) =>
-      content.split("\n").slice(Math.max(0, startLine - 1), Math.max(startLine, endLine)).join("\n");
+    const slice = (content: string) => {
+      const lines = content.split("\n").slice(Math.max(0, startLine - 1), Math.max(startLine, endLine));
+      // Strip the common leading indentation so a deeply-nested function reads
+      // from the left edge instead of being shoved to the right.
+      let minIndent = Infinity;
+      for (const line of lines) {
+        if (!line.trim()) continue; // ignore blank lines
+        minIndent = Math.min(minIndent, line.match(/^\s*/)?.[0].length ?? 0);
+      }
+      const dedented = minIndent && minIndent !== Infinity ? lines.map((l) => l.slice(minIndent)) : lines;
+      return dedented.join("\n");
+    };
     const render = (content: string) =>
       setState({ status: "ready", html: highlightCode(slice(content), langFromPath(filePath)) });
 
