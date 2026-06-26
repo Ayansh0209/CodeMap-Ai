@@ -11,6 +11,7 @@ import {
   sanitizeFileId,
 } from "../lib/graphHelpers";
 import { functionMarker } from "../lib/functionMarker";
+import FunctionCodePeek from "./FunctionCodePeek";
 
 interface FunctionGraphProps {
   selectedFunction: FunctionNodeDTO;
@@ -93,8 +94,10 @@ export default function FunctionGraph({
   const [callerPage, setCallerPage] = useState(0);
   const [calleePage, setCalleePage] = useState(0);
 
-  // Reset pages when function changes
-  useMemo(() => { setCallerPage(0); setCalleePage(0); }, [selectedFunction.id]);
+  const [showCode, setShowCode] = useState(false);
+
+  // Reset pages + collapse the inline code when the focused function changes
+  useMemo(() => { setCallerPage(0); setCalleePage(0); setShowCode(false); }, [selectedFunction.id]);
 
   const callerTotalPages = Math.ceil(callers.length / PAGE_SIZE);
   const calleeTotalPages = Math.ceil(callees.length / PAGE_SIZE);
@@ -351,32 +354,61 @@ export default function FunctionGraph({
             </div>
           </div>
 
-          {/* GitHub link */}
-          <a
-            id="function-github-link"
-            href={githubLineLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
-            style={{
-              background: "#1c2128",
-              border: "1px solid #30363d",
-              color: "#e6edf3",
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="currentColor"
+          {/* GitHub link + inline "show code" */}
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <a
+              id="function-github-link"
+              href={githubLineLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
+              style={{
+                background: "#1c2128",
+                border: "1px solid #30363d",
+                color: "#e6edf3",
+              }}
             >
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-            </svg>
-            Open in GitHub
-            <span style={{ color: "#484f58" }}>
-              L{selectedFunction.startLine}–L{selectedFunction.endLine}
-            </span>
-          </a>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+              </svg>
+              Open in GitHub
+              <span style={{ color: "#484f58" }}>
+                L{selectedFunction.startLine}–L{selectedFunction.endLine}
+              </span>
+            </a>
+            <button
+              onClick={() => setShowCode((v) => !v)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
+              style={{
+                background: showCode ? "rgba(88,166,255,0.12)" : "#1c2128",
+                border: `1px solid ${showCode ? "rgba(88,166,255,0.4)" : "#30363d"}`,
+                color: showCode ? "#58a6ff" : "#e6edf3",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+              </svg>
+              {showCode ? "Hide code" : "Show code"}
+            </button>
+          </div>
+
+          {showCode && (
+            <div className="w-full max-w-lg">
+              <FunctionCodePeek
+                owner={owner}
+                repo={repo}
+                commitSha={commitSha}
+                filePath={selectedFunction.filePath}
+                startLine={selectedFunction.startLine}
+                endLine={selectedFunction.endLine}
+              />
+            </div>
+          )}
 
           {callees.length > 0 && (
             <div className="text-xs" style={{ color: "#484f58" }}>

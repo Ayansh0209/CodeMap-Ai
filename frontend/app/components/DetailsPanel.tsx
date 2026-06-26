@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type {
   FileNodeDTO,
   ImportEdgeDTO,
@@ -16,6 +17,7 @@ import {
 import { functionMarker } from "../lib/functionMarker";
 import CodeViewer from "./CodeViewer";
 import AIChatTab from "./AIChatTab";
+import FunctionCodePeek from "./FunctionCodePeek";
 
 interface DetailsPanelProps {
   file: FileNodeDTO | null;
@@ -69,6 +71,8 @@ export default function DetailsPanel({
   isChatLoading,
   setIsChatLoading,
 }: DetailsPanelProps) {
+  // Which function rows have their inline code expanded (keyed per row).
+  const [openCode, setOpenCode] = useState<Set<string>>(new Set());
   if (!file) return null;
 
   // imports FROM this file (outgoing)
@@ -377,71 +381,100 @@ export default function DetailsPanel({
               className="space-y-1 overflow-y-auto pr-1"
               style={{ maxHeight: "300px" }}
             >
-              {functions.map((fn, i) => (
-                <button
-                  key={`${fn.id}@${fn.startLine}#${i}`}
-                  className="w-full text-left py-2 px-2.5 rounded-lg transition-colors flex items-center gap-2"
-                  style={{
-                    background: "transparent",
-                    color: "#e6edf3",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = "#1c2128";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = "transparent";
-                  }}
-                  onClick={() => onFunctionClick(fn)}
-                >
-                  {/* Name */}
-                  <span
-                    className="text-sm font-semibold truncate flex-1"
-                    style={{
-                      fontFamily: "var(--font-geist-mono), monospace",
-                      color: "#e6edf3",
-                    }}
-                  >
-                    {fn.name}
-                  </span>
-
-                  {/* Kind badge */}
-                  <span
-                    className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
-                    style={{
-                      background: getKindBadgeColor(fn.kind),
-                      color: "#e6edf3",
-                    }}
-                  >
-                    {fn.name.startsWith("describe") ? "suite" : (fn.name.startsWith("it") || fn.name.startsWith("test(")) ? "test case" : getKindBadge(fn.kind)}
-                  </span>
-
-                  {/* Line range */}
-                  <span
-                    className="text-[10px] shrink-0"
-                    style={{ color: "#484f58" }}
-                  >
-                    L{fn.startLine}-{fn.endLine}
-                  </span>
-
-                  {/* Language-aware marker badge (exp / exported / static / private / decl) */}
-                  {(() => {
-                    const marker = functionMarker({
-                      isExported: fn.isExported,
-                      isDeclaration: fn.isDeclaration,
-                      filePath: fn.filePath,
-                    });
-                    return marker ? (
+              {functions.map((fn, i) => {
+                const codeKey = `${fn.id}#${i}`;
+                const codeOpen = openCode.has(codeKey);
+                return (
+                  <div key={`${fn.id}@${fn.startLine}#${i}`}>
+                    <div
+                      role="button"
+                      className="w-full text-left py-2 px-2.5 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+                      style={{ background: codeOpen ? "#1c2128" : "transparent", color: "#e6edf3" }}
+                      onMouseEnter={(e) => { if (!codeOpen) (e.currentTarget as HTMLElement).style.background = "#1c2128"; }}
+                      onMouseLeave={(e) => { if (!codeOpen) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                      onClick={() => onFunctionClick(fn)}
+                    >
+                      {/* Name */}
                       <span
-                        className="text-[9px] px-1 py-0.5 rounded shrink-0"
-                        style={{ background: marker.bg, color: marker.color }}
-                        title={marker.title}
+                        className="text-sm font-semibold truncate flex-1"
+                        style={{
+                          fontFamily: "var(--font-geist-mono), monospace",
+                          color: "#e6edf3",
+                        }}
                       >
-                        {marker.label}
+                        {fn.name}
                       </span>
-                    ) : null;
-                  })()}
-                </button>
-              ))}
+
+                      {/* Kind badge */}
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                        style={{
+                          background: getKindBadgeColor(fn.kind),
+                          color: "#e6edf3",
+                        }}
+                      >
+                        {fn.name.startsWith("describe") ? "suite" : (fn.name.startsWith("it") || fn.name.startsWith("test(")) ? "test case" : getKindBadge(fn.kind)}
+                      </span>
+
+                      {/* Line range */}
+                      <span
+                        className="text-[10px] shrink-0"
+                        style={{ color: "#484f58" }}
+                      >
+                        L{fn.startLine}-{fn.endLine}
+                      </span>
+
+                      {/* Language-aware marker badge (exp / exported / static / private / decl) */}
+                      {(() => {
+                        const marker = functionMarker({
+                          isExported: fn.isExported,
+                          isDeclaration: fn.isDeclaration,
+                          filePath: fn.filePath,
+                        });
+                        return marker ? (
+                          <span
+                            className="text-[9px] px-1 py-0.5 rounded shrink-0"
+                            style={{ background: marker.bg, color: marker.color }}
+                            title={marker.title}
+                          >
+                            {marker.label}
+                          </span>
+                        ) : null;
+                      })()}
+
+                      {/* Inline "show code" toggle (doesn't trigger row navigation) */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenCode((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(codeKey)) n.delete(codeKey); else n.add(codeKey);
+                            return n;
+                          });
+                        }}
+                        title={codeOpen ? "Hide code" : "Show code"}
+                        className="shrink-0 w-6 h-6 rounded flex items-center justify-center transition-colors"
+                        style={{ color: codeOpen ? "#58a6ff" : "#8b949e", background: codeOpen ? "rgba(88,166,255,0.12)" : "transparent" }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {codeOpen && (
+                      <FunctionCodePeek
+                        owner={owner}
+                        repo={repo}
+                        commitSha={commitSha}
+                        filePath={fn.filePath}
+                        startLine={fn.startLine}
+                        endLine={fn.endLine}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>

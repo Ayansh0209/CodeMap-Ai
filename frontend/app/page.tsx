@@ -7,6 +7,7 @@ import ProgressBar from "./components/ProgressBar";
 import IssueMapperDemo from "./components/IssueMapperDemo";
 import GraphFlowDemo from "./components/GraphFlowDemo";
 import FixFlowDemo from "./components/FixFlowDemo";
+import FunctionGraphDemo from "./components/FunctionGraphDemo";
 import NetworkBackdrop from "./components/NetworkBackdrop";
 import LanguagesSection from "./components/LanguagesSection";
 import { useJobPolling } from "./hooks/useJobPolling";
@@ -303,6 +304,33 @@ export default function Home() {
                 </ul>
               </div>
               <GraphFlowDemo />
+            </div>
+          </section>
+
+          {/* ── Function-graph spotlight: change impact ───────────────────── */}
+          <section className="max-w-5xl mx-auto px-6 pb-20 w-full">
+            <div className="rounded-3xl border border-border bg-surface/50 p-8 md:p-12 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
+              <div className="order-2 md:order-1">
+                <FunctionGraphDemo />
+              </div>
+              <div className="order-1 md:order-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-accent mb-3">
+                  Function call graph
+                </p>
+                <h3 className="text-2xl font-bold text-foreground mb-4 tracking-tight">
+                  Change a function — safely.
+                </h3>
+                <p className="text-muted leading-relaxed mb-4">
+                  Before you touch a function, see exactly who calls it and what it
+                  calls. You change only what&apos;s connected — nothing breaks
+                  downstream, and your PR doesn&apos;t get sent back.
+                </p>
+                <ul className="space-y-2 text-sm text-muted/80">
+                  <li className="flex items-start gap-2"><span className="text-accent mt-0.5">→</span> Callers ← function → callees, at a glance</li>
+                  <li className="flex items-start gap-2"><span className="text-accent mt-0.5">→</span> Read the body inline — no tab-switching</li>
+                  <li className="flex items-start gap-2"><span className="text-accent mt-0.5">→</span> Exported but uncalled? It still shows who imports it</li>
+                </ul>
+              </div>
             </div>
           </section>
 
