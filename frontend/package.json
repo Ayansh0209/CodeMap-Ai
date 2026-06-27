@@ -11,6 +11,7 @@
   "dependencies": {
     "@types/d3": "^7.4.3",
     "@types/dagre": "^0.7.54",
+    "@vercel/analytics": "^2.0.1",
     "d3": "^7.9.0",
     "d3-dag": "^1.2.1",
     "dagre": "^0.8.5",
