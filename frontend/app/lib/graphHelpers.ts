@@ -22,6 +22,28 @@ export function getLanguageColor(language: string): string {
   return LANGUAGE_COLORS[language] || LANGUAGE_COLORS.unknown;
 }
 
+// Display labels for the (actual) language values the backend emits. Note the
+// parser stores .tsx as "typescript" and .jsx as "javascript" — UI/component
+// files are surfaced via the "UI" kind filter (by extension), not language.
+const LANGUAGE_LABELS: Record<string, string> = {
+  typescript: "TypeScript",
+  javascript: "JavaScript",
+  tsx: "TSX",
+  jsx: "JSX",
+  json: "JSON",
+  css: "CSS",
+  html: "HTML",
+  python: "Python",
+  go: "Go",
+  c: "C",
+  cpp: "C++",
+  unknown: "Other",
+};
+
+export function getLanguageLabel(language: string): string {
+  return LANGUAGE_LABELS[language] || (language ? language[0].toUpperCase() + language.slice(1) : "Other");
+}
+
 // ── Node sizing ───────────────────────────────────────────────────────────────
 
 export function getNodeRadius(lineCount: number): number {
@@ -79,6 +101,7 @@ const KIND_BADGES: Record<string, string> = {
   utility: "util",
   callback: "cb",
   "context-provider": "ctx",
+  structure: "struct",
   unknown: "fn",
 };
 

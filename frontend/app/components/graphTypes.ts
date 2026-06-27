@@ -12,6 +12,7 @@ export interface SimNode extends d3.SimulationNodeDatum {
   isGroup?: boolean;
   childCount?: number;
   hop?: number;
+  side?: "left" | "right" | "center"; // focus-graph column the node belongs to
 }
 
 export interface SimLink extends d3.SimulationLinkDatum<SimNode> {

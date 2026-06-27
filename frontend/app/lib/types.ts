@@ -59,6 +59,7 @@ export interface StructureNodeDTO {
   startLine: number;
   endLine: number;
   isExported: boolean;
+  kind?: "value" | "interface" | "type"; // value = runtime const/registration; interface/type = TS contract
 }
 
 export interface ImportEdgeDTO {
@@ -93,8 +94,10 @@ export interface FunctionNodeDTO {
   endLine: number;
   isExported: boolean;
   isDeclaration?: boolean;   // C/C++ header prototype (no body)
+  isRecovered?: boolean;     // heuristically recovered from an ERROR-trapped region
+                             // (macro-heavy C/C++); calls/edges are best-effort
   isAsync?: boolean;
-  kind: "function" | "arrow" | "method" | "constructor" | "getter" | "setter" | "async" | "component" | "hook" | "reducer" | "route-handler" | "middleware" | "test" | "utility" | "callback" | "context-provider" | "unknown";
+  kind: "function" | "arrow" | "method" | "constructor" | "getter" | "setter" | "async" | "component" | "hook" | "reducer" | "route-handler" | "middleware" | "test" | "utility" | "callback" | "context-provider" | "structure" | "unknown";
   visibility?: "public" | "private" | "protected";
   parentId?: string;
   calls: string[];       // FunctionNode IDs this calls
@@ -113,6 +116,11 @@ export interface FunctionFilePayload {
   fileId: string;        // original path e.g. "src/utils/parser.ts"
   functions: FunctionNodeDTO[];
   callEdges: CallEdgeDTO[];
+  // Set by the /functions route on a miss: "indexing" = still being stored in
+  // the background (show a loader), "cache-miss" = genuinely no functions.
+  source?: "cache" | "cache-miss" | "indexing";
+  isBarrel?: boolean;
+  barrelTargets?: string[];
 }
 
 // ── API response types ────────────────────────────────────────────────────────

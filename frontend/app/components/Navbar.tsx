@@ -31,8 +31,10 @@ export default function Navbar({ owner, repo, onAnalyzeAnother }: NavbarProps) {
       className="flex items-center justify-between px-4 shrink-0"
       style={{
         height: "48px",
-        background: "#0d1117",
-        borderBottom: "1px solid #21262d",
+        // Subtle, static brand wash on the left (logo side) — echoes the landing
+        // page's orange→pink aurora without any animation.
+        background: "linear-gradient(90deg, rgba(251,122,60,0.06), rgba(236,72,153,0.03) 40%, transparent 65%), #101014",
+        borderBottom: "1px solid #2c2c35",
       }}
     >
       {/* Left — Logo */}
@@ -45,8 +47,8 @@ export default function Navbar({ owner, repo, onAnalyzeAnother }: NavbarProps) {
         </div>
         <span className="text-sm font-bold" style={{ color: "#e6edf3" }}>
           <span>Code</span>
-          <span style={{ color: "#6366f1" }}>Map</span>
-          <span className="text-xs font-medium ml-0.5" style={{ color: "#a78bfa" }}>AI</span>
+          <span style={{ color: "#fb7a3c" }}>Map</span>
+          <span className="text-xs font-medium ml-0.5" style={{ color: "#ec4899" }}>AI</span>
         </span>
       </div>
 
@@ -74,7 +76,7 @@ export default function Navbar({ owner, repo, onAnalyzeAnother }: NavbarProps) {
           target="_blank"
           rel="noopener noreferrer"
           title="Support CodeMap development"
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors hover:bg-[#21262d] border border-transparent hover:border-[#30363d]"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-colors hover:bg-[#23232a] border border-transparent hover:border-[#2c2c35]"
           style={{ color: "#e6edf3" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -82,7 +84,7 @@ export default function Navbar({ owner, repo, onAnalyzeAnother }: NavbarProps) {
           </svg>
           <span className="hidden sm:inline">Star on GitHub</span>
           {stars !== null && (
-            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-[#161b22] border border-[#30363d] ml-0.5 sm:ml-1">
+            <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-[#17171d] border border-[#2c2c35] ml-0.5 sm:ml-1">
               <span style={{ color: "#e3b341" }}>★</span>
               {stars > 999 ? (stars / 1000).toFixed(1) + "k" : stars}
             </span>
@@ -95,7 +97,7 @@ export default function Navbar({ owner, repo, onAnalyzeAnother }: NavbarProps) {
         {/* Future Donate Slot (Hidden for now) */}
         {/* <div className="hidden" id="donate-slot"></div> */}
 
-        <div className="w-px h-4 bg-[#30363d]" />
+        <div className="w-px h-4 bg-[#2c2c35]" />
 
         {/* Analyze Another */}
         <button

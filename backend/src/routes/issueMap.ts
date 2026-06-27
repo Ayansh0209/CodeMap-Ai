@@ -26,7 +26,7 @@
 
 import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { redisConnection } from "../queue/jobQueue";
+import { jobQueue, redisConnection } from "../queue/jobQueue";
 import { getFileGraph } from "../storage/artifactStore";
 import {
     fetchIssue,
@@ -44,6 +44,22 @@ import { buildChatContext } from "../parser/chatContextBuilder";
 import { rateLimiter, getClientIdentifier, getDateString } from "../middleware/rateLimiter";
 
 const router = Router();
+
+/**
+ * Is this repo's analysis job still running? Used by the issue mapper to ask the
+ * client to wait (rather than run a degraded mapping) when the RetrievalIndex
+ * isn't built yet.
+ */
+async function isAnalysisActive(owner: string, repo: string): Promise<boolean> {
+    try {
+        const job = await jobQueue.getJob(`${owner}--${repo}`.toLowerCase());
+        if (!job) return false;
+        const state = await job.getState();
+        return state === "active" || state === "waiting" || state === "delayed" || state === "prioritized";
+    } catch {
+        return false;
+    }
+}
 
 // ── Zod schemas ───────────────────────────────────────────────────────────────
 // These are kept exactly as-is — the frontend depends on these shapes.
@@ -184,6 +200,28 @@ router.post("/map", async (req: Request, res: Response, next: NextFunction) => {
             }
         } catch {
             console.warn("[issueMap] Redis unavailable for cache check — running pipeline");
+        }
+
+        // ── Step 2.5: "Not ready yet" guard ───────────────────────────────────
+        // The issue mapper runs on the RetrievalIndex, which is built from the
+        // COMPLETE function graph at the end of analysis — it's all-or-nothing,
+        // never half-built. The normal flow can't reach here before it's stored
+        // (the UI only loads after the "ready" signal, which fires AFTER the
+        // index is written). But if the index is missing AND the analysis job is
+        // still running (e.g. re-analysis, or someone opening the repo URL
+        // directly mid-analysis), ask the client to wait instead of mapping on
+        // an incomplete graph.
+        try {
+            const hasRetrieval = await redisConnection.exists(`retrieval:${owner}:${repo}`);
+            if (!hasRetrieval && await isAnalysisActive(owner, repo)) {
+                console.log(`[issueMap] retrieval index not ready (analysis active) — asking client to retry: ${owner}/${repo}`);
+                return res.status(409).json({
+                    error: "Analysis is still finishing — the issue mapper will be ready in a few seconds. Please try again.",
+                    preparing: true,
+                });
+            }
+        } catch {
+            // Redis/queue unavailable — fall through; the pipeline degrades safely.
         }
 
         // ── Step 3: Fetch issue from GitHub ───────────────────────────────────
@@ -384,36 +422,63 @@ const ChatRequestSchema = z.object({
     commitSha:     z.string().min(1).max(200),
     issueNumber:   z.number().int().positive().optional(),
     currentFileId: z.string().min(1).max(500),
+    // "Deep" mode → turn on flash's thinking for complex questions (slower, still flash).
+    thinking:      z.boolean().optional().default(false),
     messages:      z.array(
         z.object({
             role: z.enum(["user", "model", "assistant"]),
-            content: z.string().min(1)
+            // Bound each message: the latest one is always sent to Gemini in
+            // full (it bypasses the history-char budget), so without a cap a
+            // single huge payload balloons the prompt — a cost/abuse vector.
+            content: z.string().min(1).max(12000)
         })
-    ).min(1)
+    ).min(1).max(100)
 });
 
 router.post("/chat", rateLimiter, async (req: Request, res: Response, next: NextFunction) => {
+  // ── Validate + resolve the graph BEFORE opening the stream, so an invalid
+  //    request still gets a clean 400 (you can't change status once SSE starts).
+  let parsed: z.infer<typeof ChatRequestSchema>;
   try {
-    const parsed = ChatRequestSchema.parse(req.body);
-    const { owner, repo, commitSha, currentFileId, issueNumber, messages } = parsed;
-
-    const lastMessage = messages[messages.length - 1];
-    const lastMessageContent = lastMessage?.content || "";
-
-    // Resolve graphFileIds — R2-first via artifact store (legacy Redis fallback inside).
-    const graphFileIds = new Set<string>();
-    try {
-      const parsedGraph = await getFileGraph<{ files?: any[] }>(owner, repo, commitSha);
-      if (parsedGraph && Array.isArray(parsedGraph.files)) {
-        for (const file of parsedGraph.files) {
-          if (file && typeof file.id === "string") {
-            graphFileIds.add(file.id);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[chatRoute] Failed to fetch graph files from store:", err);
+    parsed = ChatRequestSchema.parse(req.body);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({
+        error: "Invalid request",
+        message: "Your message couldn't be processed (it may be empty or too long).",
+      });
     }
+    return next(err);
+  }
+
+  const { owner, repo, commitSha, currentFileId, issueNumber, messages, thinking } = parsed;
+  const lastMessageContent = messages[messages.length - 1]?.content || "";
+
+  // Resolve graphFileIds — R2-first via artifact store (legacy Redis fallback inside).
+  const graphFileIds = new Set<string>();
+  try {
+    const parsedGraph = await getFileGraph<{ files?: any[] }>(owner, repo, commitSha);
+    if (parsedGraph && Array.isArray(parsedGraph.files)) {
+      for (const file of parsedGraph.files) {
+        if (file && typeof file.id === "string") graphFileIds.add(file.id);
+      }
+    }
+  } catch (err) {
+    console.warn("[chatRoute] Failed to fetch graph files from store:", err);
+  }
+
+  // ── Open the SSE stream NOW, so real retrieval progress can stream live ──
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // stop reverse proxies (nginx) buffering the stream
+  res.flushHeaders();
+
+  // Typed SSE protocol: {type:"status",label} for real progress, {type:"token",text} for output.
+  const sendStatus = (label: string) => res.write(`data: ${JSON.stringify({ type: "status", label })}\n\n`);
+
+  try {
+    sendStatus("Understanding your question…");
 
     const retrievalStartTime = Date.now();
     const context = await buildChatContext({
@@ -423,24 +488,24 @@ router.post("/chat", rateLimiter, async (req: Request, res: Response, next: Next
       repo,
       commitSha,
       graphFileIds,
-      issueNumber
+      issueNumber,
+      onProgress: sendStatus, // emits real "Searching graph / Ranking N / Reading N" stages
     });
     const retrievalTimeMs = Date.now() - retrievalStartTime;
 
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    sendStatus("Generating answer…");
 
     const budgetedMessages = filterMessagesByBudget(messages);
 
     const geminiStartTime = Date.now();
-    const result = await callGeminiForChatStream(context.systemInstruction, budgetedMessages);
+    const result = await callGeminiForChatStream(context.systemInstruction, budgetedMessages, thinking);
 
     let completionText = "";
     for await (const chunk of result.stream) {
       const text = chunk.text();
+      if (!text) continue;
       completionText += text;
-      res.write(`data: ${JSON.stringify(text)}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: "token", text })}\n\n`);
     }
 
     res.write("data: [DONE]\n\n");
@@ -504,15 +569,13 @@ router.post("/chat", rateLimiter, async (req: Request, res: Response, next: Next
     })().catch(err => console.error("[chatRoute] Error processing async telemetry:", err));
 
   } catch (err) {
-    if (err instanceof z.ZodError) {
-      res.write(`data: ${JSON.stringify("[Error] Invalid request: " + err.message)}\n\n`);
-      res.write("data: [DONE]\n\n");
-      return res.end();
-    }
     console.error("[chatRoute] Error handling request:", err);
-    res.write(`data: ${JSON.stringify("[Error] Internal server error.")}\n\n`);
-    res.write("data: [DONE]\n\n");
-    res.end();
+    // Headers are already sent — surface the failure as a token so the UI shows it.
+    try {
+      res.write(`data: ${JSON.stringify({ type: "token", text: "\n\n_Sorry — something went wrong generating the response._" })}\n\n`);
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } catch { /* connection already closed */ }
   }
 });
 

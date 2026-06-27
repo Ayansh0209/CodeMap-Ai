@@ -41,6 +41,7 @@ import { buildGraph } from "../parser/builder";
 import { buildRetrievalIndex } from "../parser/retrievalBuilder";
 import {
     putArtifact,
+    putArtifactsBatch,
     artifactKeys,
     setLatestSha,
     storageBackend,
@@ -256,16 +257,11 @@ export default async function processJob(job: Job<AnalyzeJobData>): Promise<obje
         await updateProgress(job, 85, "storing graph artifacts");
 
         // ── Step 10: Persist artifacts (R2 or gzipped-Redis fallback) ─────────
-        // The file graph — canonical copy, served via GET /graph/:owner/:repo
+        // The file graph — canonical copy, served via GET /graph/:owner/:repo.
+        // This is the ONLY artifact the graph view needs up front; the per-file
+        // function artifacts are lazy-loaded (POST /functions), so they're
+        // written last — after the UI already has the graph (see below).
         await putArtifact(artifactKeys.fileGraph(owner, repo, metadata.commitSha), fileGraph);
-
-        // Per-file functions — lazy-loaded by the frontend via POST /functions
-        let funcCount = 0;
-        for (const [fileId, payload] of functionFiles.entries()) {
-            await putArtifact(artifactKeys.functions(owner, repo, metadata.commitSha, fileId), payload as object);
-            funcCount++;
-        }
-        console.log(`[worker] persisted graph + ${funcCount} per-file function artifacts (${storageBackend()})`);
 
         await setLatestSha(owner, repo, metadata.commitSha);
 
@@ -340,6 +336,32 @@ export default async function processJob(job: Job<AnalyzeJobData>): Promise<obje
         };
 
         await setCachedResult(cacheKey, result);
+
+        // ── Show the graph FIRST, store per-file functions after ──────────────
+        // status.ts can surface "done" straight from the job's progress, so for
+        // big repos (slim result — no inline graph) we hand the result over NOW:
+        // the UI redirects and renders the graph immediately instead of waiting
+        // out the per-file function writes. Those artifacts are lazy-loaded on
+        // click, and are still written below — awaited inside this job — so
+        // nothing is fire-and-forgotten and the job only completes once
+        // everything is durably stored.
+        const funcEntries = [...functionFiles.entries()].map(([fileId, payload]) => ({
+            key: artifactKeys.functions(owner, repo, metadata.commitSha, fileId),
+            data: payload as object,
+        }));
+        // Below this many function files, storage is sub-second — not worth the
+        // extra /graph round-trip, so keep the normal (inline-capable) flow.
+        if (funcEntries.length > 80) {
+            // Hand over a SLIM result now (force the client to fetch the already-
+            // stored file graph from /graph instead of inlining it — keeps the
+            // job's progress payload tiny). The UI renders immediately while the
+            // per-file function artifacts are written below.
+            const earlyResult = { ...result, _inlineFileGraph: null };
+            await job.updateProgress({ percent: 99, step: "ready", ready: true, result: earlyResult });
+            console.log(`[worker] graph ready — UI can render now; writing ${funcEntries.length} function artifacts in background`);
+        }
+        await putArtifactsBatch(funcEntries);
+        console.log(`[worker] persisted ${funcEntries.length} per-file function artifacts (${storageBackend()})`);
 
         // Success — checkpoints no longer needed
         await checkpoints.clear();

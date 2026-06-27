@@ -338,8 +338,11 @@ export async function buildChatContext(params: {
   commitSha: string;
   graphFileIds: Set<string>;
   issueNumber?: number;
+  // Emits REAL progress labels (graph search → ranking → reading files) so the
+  // UI can show what's actually happening instead of fake timed phases.
+  onProgress?: (label: string) => void;
 }): Promise<ChatContext> {
-  const { currentFileId, userMessage, owner, repo, commitSha, graphFileIds, issueNumber } = params;
+  const { currentFileId, userMessage, owner, repo, commitSha, graphFileIds, issueNumber, onProgress } = params;
 
   // 1. Check Redis cache first using v2 prefix to bust stale caches
   const cacheKey = `issue-chat-ctx:v2:${owner}:${repo}:${issueNumber ?? "no-issue"}:${currentFileId}:${commitSha}`;
@@ -414,6 +417,7 @@ export async function buildChatContext(params: {
   }
 
   // 4. Load retrieval index
+  onProgress?.("Searching the dependency graph…");
   const retrieval = await loadRetrievalIndex(owner, repo);
   if (!retrieval) {
     console.log("[chatContextBuilder] No retrieval index found, returning fallback context.");
@@ -468,10 +472,12 @@ export async function buildChatContext(params: {
   // Sort candidates by score descending to rank snippets by retrieval relevance
   candidateSet.files.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
   console.log(`[chatContextBuilder] ${candidateSet.files.length} candidates (seeds faked as PR files)`);
+  onProgress?.(`Ranking ${candidateSet.files.length} candidate file${candidateSet.files.length === 1 ? "" : "s"}…`);
 
   // 7. Fetch snippets
   const snippets = await fetchSnippets(candidateSet.files, retrieval, intent, owner, repo, commitSha);
   console.log(`[chatContextBuilder] ${snippets.length} snippets fetched`);
+  onProgress?.(`Reading ${snippets.length} relevant snippet${snippets.length === 1 ? "" : "s"}…`);
 
   // Rank snippets by existing retrieval relevance (mapping fileId to candidate's score)
   const candidateScoreMap = new Map<string, number>();
@@ -527,6 +533,7 @@ export async function buildChatContext(params: {
   // Iterative Retrieval Review and Expansion
   let finalCandidates = [...candidateSet.files];
   if (config.chat.enableIterativeRetrieval) {
+    onProgress?.("Checking for missing context…");
     console.log(`[IterativeRetrieval] Starting Stage 2 Retrieval Review.`);
     console.log(`[IterativeRetrieval] Snippets BEFORE expansion count: ${finalSnippets.length}`);
     console.log(`[IterativeRetrieval] Snippet paths:`, finalSnippets.map(s => s.fileId));

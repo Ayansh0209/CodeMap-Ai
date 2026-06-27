@@ -13,13 +13,30 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Router } from "express";
-import { redisConnection } from "../queue/jobQueue";
+import { jobQueue, redisConnection } from "../queue/jobQueue";
 import { getArtifact, artifactKeys } from "../storage/artifactStore";
 import type { RetrievalIndex } from "../models/retrieval";
 
 const router = Router();
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Is this repo's analysis job still running? The graph is shown before every
+ * per-file function artifact is written (they're lazy-loaded), so a miss for a
+ * known file while the job is active means "still being stored", not "no
+ * functions" — the UI uses this to show a loader instead of an empty state.
+ */
+async function isAnalysisActive(owner: string, repo: string): Promise<boolean> {
+    try {
+        const job = await jobQueue.getJob(`${owner}--${repo}`.toLowerCase());
+        if (!job) return false;
+        const state = await job.getState();
+        return state === "active" || state === "waiting" || state === "delayed" || state === "prioritized";
+    } catch {
+        return false;
+    }
+}
 
 /**
  * Legacy Redis cache key for function data (pre-artifact-store analyses).
@@ -137,9 +154,12 @@ router.post("/", async (req, res) => {
         }
 
         if (!fileEntry.isBarrel || fileEntry.barrelTargets.length === 0) {
-            // Not a barrel — just a miss for a real file (e.g. it has no functions)
-            console.log(`[functions] miss (non-barrel, no functions): ${fileId}`);
-            return res.json({ functions: [], fileId, source: "cache-miss" });
+            // Not a barrel — a miss for a real file. Distinguish "still being
+            // stored in the background" (job active) from "genuinely no
+            // functions" so the UI shows a loader, not a misleading empty state.
+            const indexing = await isAnalysisActive(owner, repo);
+            console.log(`[functions] miss (non-barrel): ${fileId} — ${indexing ? "still indexing" : "no functions"}`);
+            return res.json({ functions: [], fileId, source: indexing ? "indexing" : "cache-miss" });
         }
 
         // ── Step 3: Barrel expansion ──────────────────────────────────────────

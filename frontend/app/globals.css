@@ -10,24 +10,24 @@ html {
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-primary: #6366f1;
-  --color-primary-hover: #818cf8;
+  --color-primary: #fb7a3c;
+  --color-primary-hover: #fd9a63;
   --color-surface: var(--surface);
   --color-surface-hover: var(--surface-hover);
   --color-border: var(--border-color);
   --color-muted: var(--muted);
-  --color-accent: #a78bfa;
+  --color-accent: #ec4899;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 :root {
-  --background: #0a0a0f;
-  --foreground: #e4e4e7;
-  --surface: #141419;
-  --surface-hover: #1c1c24;
-  --border-color: #27272a;
-  --muted: #71717a;
+  --background: #0c0a0a;
+  --foreground: #e7e4e4;
+  --surface: #161312;
+  --surface-hover: #1f1a19;
+  --border-color: #2a2422;
+  --muted: #7a7574;
 }
 
 body {
@@ -40,24 +40,84 @@ body {
 
 .gradient-bg {
   background: radial-gradient(ellipse 80% 60% at 50% -20%,
-      rgba(99, 102, 241, 0.15),
+      rgba(251, 122, 60, 0.16),
       transparent),
     radial-gradient(ellipse 60% 40% at 80% 50%,
-      rgba(167, 139, 250, 0.08),
+      rgba(236, 72, 153, 0.08),
       transparent),
     var(--background);
+  background-size: 140% 140%;
+  animation: drift 18s ease-in-out infinite alternate;
+}
+
+@keyframes drift {
+  0% {
+    background-position: 0% 0%, 100% 100%, 0 0;
+  }
+
+  100% {
+    background-position: 15% 10%, 80% 85%, 0 0;
+  }
+}
+
+/* ── Aurora background (landing) — soft drifting brand-color glows over the
+      deep base. Distinct, modern, not a flat competitor gradient. ────────── */
+
+.aurora-bg {
+  background:
+    radial-gradient(42% 52% at 16% 10%, rgba(251, 122, 60, 0.16), transparent 70%),
+    radial-gradient(46% 56% at 86% 16%, rgba(236, 72, 153, 0.13), transparent 72%),
+    radial-gradient(52% 60% at 62% 98%, rgba(168, 85, 247, 0.13), transparent 72%),
+    var(--background);
+  background-size: 200% 200%, 200% 200%, 200% 200%, 100% 100%;
+  animation: aurora-drift 26s ease-in-out infinite alternate;
+}
+
+@keyframes aurora-drift {
+  0% {
+    background-position: 0% 0%, 100% 0%, 50% 100%, 0 0;
+  }
+
+  100% {
+    background-position: 22% 16%, 72% 26%, 64% 78%, 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aurora-bg {
+    animation: none;
+  }
+}
+
+/* ── Landing graph demo: late focus-pulse ring ─────────────── */
+
+@keyframes graphdemo-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.animate-graphdemo-ring {
+  animation: graphdemo-ring 1.3s ease-out both;
+  animation-delay: 2.4s;
 }
 
 /* ── Glow effects ──────────────────────────────────────────── */
 
 .glow-border {
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2),
-    0 0 20px -5px rgba(99, 102, 241, 0.15);
+  box-shadow: 0 0 0 1px rgba(251, 122, 60, 0.2),
+    0 0 20px -5px rgba(251, 122, 60, 0.15);
 }
 
 .glow-border:focus-within {
-  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.5),
-    0 0 30px -5px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 0 1px rgba(251, 122, 60, 0.5),
+    0 0 30px -5px rgba(251, 122, 60, 0.3);
 }
 
 /* ── Progress bar animation ────────────────────────────────── */
@@ -100,6 +160,52 @@ body {
 
 .animate-float {
   animation: float 6s ease-in-out infinite;
+}
+
+/* ── Landing page: dot-grid backdrop ──────────────────────── */
+
+.dot-grid-bg {
+  background-image: radial-gradient(circle, rgba(228, 228, 231, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent);
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black, transparent);
+}
+
+/* ── Landing page: staggered fade-in-up (children use --delay) ── */
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.5s ease-out both;
+  animation-delay: var(--delay, 0s);
+}
+
+/* ── Landing page: SVG line draw-in for hero graph viz ──────── */
+
+@keyframes line-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-line-draw {
+  stroke-dasharray: 1px;
+  animation: line-draw 1.2s ease-out forwards;
+  animation-delay: var(--delay, 0s);
 }
 
 /* ── D3 graph styles ───────────────────────────────────────── */

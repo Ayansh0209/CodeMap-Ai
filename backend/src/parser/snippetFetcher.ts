@@ -462,6 +462,23 @@ export async function fetchSnippets(
     const snippets: CodeSnippet[] = [];
     const fetchedContent = new Map<string, string>();
 
+    // Pre-fetch every unique file's content in PARALLEL. The slicing loop below
+    // awaits one file at a time — on a cold cache that's N sequential GitHub
+    // round-trips and was a big slice of chat latency. Barrel-summary files need
+    // no content (they emit a one-line re-export summary).
+    const filesToFetch = [...new Set(
+        selectedFiles
+            .filter((sf) => sf.zeroFunctionMode !== "barrel-summary")
+            .map((sf) => sf.candidateEntry.fileId)
+    )];
+    await Promise.all(filesToFetch.map(async (fileId) => {
+        try {
+            fetchedContent.set(fileId, await fetchRawFileCached(owner, repo, commitSha, fileId));
+        } catch (err) {
+            console.warn(`\x1b[31m[snippetFetcher] prefetch failed ${fileId}:\x1b[0m`, (err as Error).message);
+        }
+    }));
+
     for (const { candidateEntry, selectedFunctions, zeroFunctionMode } of selectedFiles) {
         if (snippets.length >= MAX_TOTAL_SNIPPETS) break;
 

@@ -18,9 +18,12 @@
 //   functions/{owner}/{repo}/{sha}/{fileId}.json.gz
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { gzipSync, gunzipSync } from "zlib";
+import { gzipSync, gunzipSync, gzip } from "zlib";
+import { promisify } from "util";
 import { config } from "../config/config";
 import { redisConnection } from "../queue/redis";
+
+const gzipAsync = promisify(gzip);
 
 // ── R2 client (lazy, optional) ────────────────────────────────────────────────
 
@@ -108,6 +111,56 @@ export async function putArtifact(key: string, data: object): Promise<void> {
 
     // Redis fallback: store gzipped buffer with TTL so it can't grow unbounded
     await redisConnection.set(redisKey(key), gz, "EX", config.artifacts.ttlSeconds);
+}
+
+/**
+ * Store many artifacts at once. Storing per-file function payloads one-by-one
+ * (await in a loop) cost one network round-trip PER FILE — ~1400 sequential
+ * round-trips dominated the "storing graph artifacts" step (minutes). This:
+ *   - Redis: gzips a chunk in parallel (libuv threadpool) then writes the whole
+ *     chunk in a single pipelined round-trip — ~6 round-trips instead of ~1400.
+ *   - R2/S3: uploads with bounded concurrency instead of strictly sequentially.
+ */
+export async function putArtifactsBatch(
+    entries: Array<{ key: string; data: object }>
+): Promise<void> {
+    if (entries.length === 0) return;
+    const s3 = getS3();
+
+    if (s3) {
+        const { PutObjectCommand } = require("@aws-sdk/client-s3");
+        const CONCURRENCY = 32;
+        for (let i = 0; i < entries.length; i += CONCURRENCY) {
+            await Promise.all(
+                entries.slice(i, i + CONCURRENCY).map(async ({ key, data }) => {
+                    const gz = await gzipAsync(Buffer.from(JSON.stringify(data)));
+                    await s3.send(new PutObjectCommand({
+                        Bucket: config.r2.bucketName,
+                        Key: key,
+                        Body: gz,
+                        ContentType: "application/json",
+                        ContentEncoding: "gzip",
+                    }));
+                })
+            );
+        }
+        return;
+    }
+
+    // Redis: compress a chunk concurrently, then SET the whole chunk in one
+    // pipelined round-trip (TTL'd, same as putArtifact).
+    const CHUNK = 256;
+    for (let i = 0; i < entries.length; i += CHUNK) {
+        const slice = entries.slice(i, i + CHUNK);
+        const gzs = await Promise.all(
+            slice.map(({ data }) => gzipAsync(Buffer.from(JSON.stringify(data))))
+        );
+        const pipeline = redisConnection.pipeline();
+        slice.forEach(({ key }, j) => {
+            pipeline.set(redisKey(key), gzs[j], "EX", config.artifacts.ttlSeconds);
+        });
+        await pipeline.exec();
+    }
 }
 
 /** Fetch the raw gzipped bytes (for streaming straight to a browser). */

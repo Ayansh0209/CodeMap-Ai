@@ -604,6 +604,39 @@ function extractStructures(
         });
     });
 
+    // ── Part 3: Exported interfaces & type aliases (TypeScript contracts) ──────
+    //
+    // Type-only declarations are erased at runtime but are a large part of a
+    // TS file's structure (tRPC-style libraries are very type-heavy). Without
+    // this, files that only export types/interfaces show as near-empty.
+    // Exported-only — matches the public-surface focus of Parts 1-2 and avoids
+    // internal one-liner-type noise.
+    sourceFile.getInterfaces().forEach(node => {
+        if (!node.isExported()) return;
+        structures.push({
+            id: makeFunctionId(relativePath, node.getName()),
+            name: node.getName(),
+            filePath: relativePath,
+            startLine: node.getStartLineNumber(),
+            endLine: node.getEndLineNumber(),
+            isExported: true,
+            kind: "interface",
+        });
+    });
+
+    sourceFile.getTypeAliases().forEach(node => {
+        if (!node.isExported()) return;
+        structures.push({
+            id: makeFunctionId(relativePath, node.getName()),
+            name: node.getName(),
+            filePath: relativePath,
+            startLine: node.getStartLineNumber(),
+            endLine: node.getEndLineNumber(),
+            isExported: true,
+            kind: "type",
+        });
+    });
+
     return structures;
 }
 

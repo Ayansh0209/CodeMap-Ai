@@ -188,7 +188,7 @@ export default function FocusGraph({
       .attr("marker-end", d => { const tid = typeof d.target === "string" ? d.target : (d.target as any).id; return leftIds.has(tid) || tid === focusedNodeId ? "url(#focus-arrow-green)" : "url(#focus-arrow-blue)"; });
 
     // Tooltip
-    const tooltip = d3.select(container).append("div").style("position", "absolute").style("background", "rgba(13,17,23,0.95)").style("border", "1px solid #30363d").style("border-radius", "8px").style("padding", "8px 12px").style("font-size", "12px").style("color", "#e6edf3").style("pointer-events", "none").style("opacity", "0").style("z-index", "100");
+    const tooltip = d3.select(container).append("div").style("position", "absolute").style("background", "rgba(16,16,20,0.95)").style("border", "1px solid #2c2c35").style("border-radius", "8px").style("padding", "8px 12px").style("font-size", "12px").style("color", "#e6edf3").style("pointer-events", "none").style("opacity", "0").style("z-index", "100");
 
     // Nodes — rounded rectangles
     const nodeG = g.append("g").selectAll("g").data(nodes).join("g").attr("transform", d => `translate(${d.x}, ${d.y})`).style("cursor", "pointer");
@@ -202,7 +202,7 @@ export default function FocusGraph({
       const h = isFocused ? CENTER_H : RECT_H;
 
       if (isGhost) {
-        g2.append("rect").attr("x", -w / 2).attr("y", -h / 2).attr("width", w).attr("height", h).attr("rx", 8).attr("fill", "transparent").attr("stroke", "#30363d").attr("stroke-width", 1.5).attr("stroke-dasharray", "6,3");
+        g2.append("rect").attr("x", -w / 2).attr("y", -h / 2).attr("width", w).attr("height", h).attr("rx", 8).attr("fill", "transparent").attr("stroke", "#2c2c35").attr("stroke-width", 1.5).attr("stroke-dasharray", "6,3");
         g2.append("text").attr("text-anchor", "middle").attr("dy", "0.35em").attr("fill", "#484f58").attr("font-size", "11px").attr("font-family", "monospace").text(d.data.label);
         return;
       }
@@ -214,7 +214,7 @@ export default function FocusGraph({
 
       const strokeColor = isFocused ? "#f0883e" : (leftIds.has(d.id) ? "#3fb950" : "#58a6ff");
       g2.append("rect").attr("x", -w / 2).attr("y", -h / 2).attr("width", w).attr("height", h).attr("rx", 8)
-        .attr("fill", isFocused ? "#1c2128" : "#0d1117").attr("stroke", strokeColor).attr("stroke-width", isFocused ? 2.5 : 1.5)
+        .attr("fill", isFocused ? "#1e1e25" : "#101014").attr("stroke", strokeColor).attr("stroke-width", isFocused ? 2.5 : 1.5)
         .attr("opacity", isSearchMatch ? 1 : 0.15);
 
       g2.append("text").attr("x", -w / 2 + 10).attr("y", -h / 2 + 18).attr("fill", "#e6edf3").attr("font-size", "12px").attr("font-weight", "bold").attr("font-family", "monospace").attr("opacity", isSearchMatch ? 1 : 0.15).text(trunc(d.data.label, 18));
@@ -275,5 +275,5 @@ export default function FocusGraph({
     }, 50);
   }, [focusedNodeId, files, edges, focusDepth, focusSearch, focusSortBy, expandedFolders, onFileClick, onNavigate, onExpandFolder, onExpandSide]);
 
-  return <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: "#0d1117" }} />;
+  return <div ref={containerRef} className="w-full h-full overflow-hidden" style={{ background: "#101014" }} />;
 }

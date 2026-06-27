@@ -12,6 +12,7 @@ import FunctionGraph from "../components/FunctionGraph";
 import DetailsPanel from "../components/DetailsPanel";
 import GraphControls from "../components/GraphControls";
 import SearchPanel from "../components/SearchPanel";
+import { useChatSessions } from "../hooks/useChatSessions";
 import { GITHUB_REPO_URL } from "../lib/constants";
 import MobileWarning from "../components/MobileWarning";
 import type {
@@ -133,6 +134,8 @@ function RepoPageContent() {
   // ── Core data ───────────────────────────────────────────────────────────────
   const fileGraph = result?._inlineFileGraph ?? null;
   const [fetchedFunctions, setFetchedFunctions] = useState<Record<string, FunctionFilePayload>>({});
+  // Per-file lazy-load state for the (background-stored) function artifacts.
+  const [fnStatus, setFnStatus] = useState<Record<string, "loading" | "ready" | "error">>({});
 
   const functionFiles: Record<string, FunctionFilePayload> = useMemo(() => {
     const base = result?._functionFiles ?? {};
@@ -167,6 +170,18 @@ function RepoPageContent() {
     return set;
   }, [modules]);
 
+  // Distinct languages actually present, most-common first — drives the dynamic
+  // legend and the dynamic language filter (so a C++ repo shows C++, not TS/JS).
+  const availableLanguages = useMemo(() => {
+    if (!fileGraph) return [] as string[];
+    const counts = new Map<string, number>();
+    for (const f of fileGraph.files) {
+      const lang = f.language || "unknown";
+      counts.set(lang, (counts.get(lang) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
+  }, [fileGraph]);
+
   const filteredNodeIds = useMemo(() => {
     if (!fileGraph) return undefined;
     if (activeKinds.size === 0 && activeLanguages.size === 0) return undefined;
@@ -176,10 +191,11 @@ function RepoPageContent() {
       let kindMatch = activeKinds.size === 0;
       if (activeKinds.size > 0) {
         if (activeKinds.has("entry") && representativeFilesSet.has(f.id)) kindMatch = true;
-        else if (activeKinds.has("source") && f.kind === "source") kindMatch = true;
         else if (activeKinds.has("test") && f.kind === "test") kindMatch = true;
         else if (activeKinds.has("config") && f.kind === "config") kindMatch = true;
-        else if (activeKinds.has("ui") && (f.language === "tsx" || f.language === "jsx")) kindMatch = true;
+        // UI = React component files. Language is stored as typescript/javascript
+        // (never "tsx"/"jsx"), so match by extension instead.
+        else if (activeKinds.has("ui") && (f.path.endsWith(".tsx") || f.path.endsWith(".jsx"))) kindMatch = true;
       }
 
       let langMatch = activeLanguages.size === 0;
@@ -329,10 +345,8 @@ function RepoPageContent() {
   const [isLoadingCode, setIsLoadingCode] = useState(false);
   const fileContentCache = useRef<Map<string, string>>(new Map());
 
-  // ── Chat state (preserved) ──────────────────────────────────────────────────
-  interface ChatMessage { role: "user" | "assistant"; content: string; }
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [isChatLoading, setIsChatLoading] = useState(false);
+  // ── Chat sessions (on-device history, scoped per repo) ──────────────────────
+  const chat = useChatSessions(`${owner}/${repo}`);
 
   // ── Refs ─────────────────────────────────────────────────────────────────────
   const resetZoomRef = useRef<(() => void) | null>(null);
@@ -451,6 +465,30 @@ function RepoPageContent() {
 
   // ── Handlers ────────────────────────────────────────────────────────────────
 
+  // Lazy-load a file's functions. The graph is shown before every per-file
+  // function artifact is written, so a "miss" can mean "still being stored":
+  // the backend tells us via source==="indexing" and we retry (bounded) while
+  // showing a loader, instead of falsely reporting "no functions".
+  const loadFunctions = useCallback((fileId: string, attempt = 0) => {
+    if (!result?.commitSha) return;
+    const sid = sanitizeFileId(fileId);
+    setFnStatus(prev => ({ ...prev, [fileId]: "loading" }));
+    fetchFileFunctions(owner, repo, result.commitSha, fileId)
+      .then(payload => {
+        const empty = !payload.functions || payload.functions.length === 0;
+        if (empty && payload.source === "indexing" && attempt < 15) {
+          setTimeout(() => loadFunctions(fileId, attempt + 1), 1400);
+          return;
+        }
+        setFetchedFunctions(prev => ({ ...prev, [fileId]: payload, [sid]: payload }));
+        setFnStatus(prev => ({ ...prev, [fileId]: "ready" }));
+      })
+      .catch(err => {
+        console.warn('[repo] Failed to fetch functions for', fileId, err);
+        setFnStatus(prev => ({ ...prev, [fileId]: "error" }));
+      });
+  }, [owner, repo, result]);
+
   const handleFileClick = useCallback((file: FileNodeDTO | null) => {
     if (!file) {
       setSelectedFile(null);
@@ -464,18 +502,14 @@ function RepoPageContent() {
     // Lazy fetch functions if not already available
     const sid = sanitizeFileId(file.id);
     const hasFunctions = (result?._functionFiles && result._functionFiles[sid]) || fetchedFunctions[file.id] || fetchedFunctions[sid];
-    
+
     if (!hasFunctions && result?.commitSha) {
-      fetchFileFunctions(owner, repo, result.commitSha, file.id)
-        .then(payload => {
-          setFetchedFunctions(prev => ({ ...prev, [file.id]: payload, [sid]: payload }));
-        })
-        .catch(err => console.warn('[repo] Failed to fetch functions for', file.id, err));
+      loadFunctions(file.id);
     }
 
     // Push history: navigated to a file
     pushHistory({ view: "file-graph", fileId: file.id, fnId: null, fnName: null });
-  }, [pushHistory, result, fetchedFunctions, owner, repo]);
+  }, [pushHistory, result, fetchedFunctions, loadFunctions]);
 
   const handleFileNavigate = useCallback((fileId: string) => {
     if (!fileGraph) return;
@@ -487,16 +521,12 @@ function RepoPageContent() {
 
       const hasFunctions = (result?._functionFiles && result._functionFiles[file.id]) || fetchedFunctions[file.id];
       if (!hasFunctions && result?.commitSha) {
-        fetchFileFunctions(owner, repo, result.commitSha, file.id)
-          .then(payload => {
-            setFetchedFunctions(prev => ({ ...prev, [file.id]: payload }));
-          })
-          .catch(err => console.warn('[repo] Failed to fetch functions for', file.id, err));
+        loadFunctions(file.id);
       }
 
       pushHistory({ view: "file-graph", fileId: file.id, fnId: null, fnName: null });
     }
-  }, [fileGraph, pushHistory, result, fetchedFunctions, owner, repo]);
+  }, [fileGraph, pushHistory, result, fetchedFunctions, loadFunctions]);
 
   const handleFunctionClick = useCallback((fn: FunctionNodeDTO) => {
     setSelectedFunction(fn);
@@ -647,9 +677,9 @@ function RepoPageContent() {
   // ── Loading / redirect state ──────────────────────────────────────────────
   if (!loaded || !fileGraph) {
     return (
-      <div className="flex items-center justify-center h-screen" style={{ background: "#0a0a0f" }}>
+      <div className="flex items-center justify-center h-screen" style={{ background: "#101014" }}>
         <div className="flex items-center gap-3">
-          <span className="inline-block w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#6366f1", borderTopColor: "transparent" }} />
+          <span className="inline-block w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#fb7a3c", borderTopColor: "transparent" }} />
           <span className="text-sm" style={{ color: "#8b949e" }}>Loading graph...</span>
         </div>
       </div>
@@ -659,7 +689,7 @@ function RepoPageContent() {
 
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden" style={{ background: "#0d1117" }}>
+    <div className="flex flex-col h-screen overflow-hidden" style={{ background: "#101014" }}>
       {showWarning && (
         <MobileWarning
           onContinue={() => {
@@ -677,7 +707,7 @@ function RepoPageContent() {
         <div 
           className={`${
             isTabletOrMobile 
-              ? "absolute left-0 top-0 bottom-0 z-30 shadow-2xl bg-[#0d1117]" 
+              ? "absolute left-0 top-0 bottom-0 z-30 shadow-2xl bg-[#101014]" 
               : "relative"
           } flex h-full`}
         >
@@ -716,7 +746,8 @@ function RepoPageContent() {
               onSearchChange={setSearchQuery}
               onViewChange={handleViewChange}
               onResetView={handleResetView}
-              onSearchOpen={() => setSearchPanelOpen(true)}
+              files={displayGraph?.files ?? fileGraph.files}
+              onSelectSuggestion={(id) => { handleFileNavigate(id); handleZoomToNode(id); }}
               fileCount={(displayGraph?.files ?? fileGraph.files).length}
               edgeCount={(displayGraph?.edges ?? fileGraph.importEdges).length}
               hasFunctionSelected={!!selectedFunction}
@@ -727,6 +758,7 @@ function RepoPageContent() {
               activeLanguages={activeLanguages}
               onKindsChange={setActiveKinds}
               onLanguagesChange={setActiveLanguages}
+              availableLanguages={availableLanguages}
             />
           </div>
 
@@ -761,11 +793,18 @@ function RepoPageContent() {
                     onFunctionNavigate={handleFunctionNavigate}
                     onBackToFileGraph={handleBackToFileGraph}
                     onBackToFile={handleBackToFile}
+                    importedByFiles={
+                      fileGraph
+                        ? fileGraph.importEdges
+                            .filter((e) => e.target === selectedFunction.filePath)
+                            .map((e) => e.source)
+                        : []
+                    }
                   />
                 ) : (
                   <div
                     className="flex items-center justify-center h-full"
-                    style={{ background: "#0d1117", color: "#484f58" }}
+                    style={{ background: "#101014", color: "#484f58" }}
                   >
                     <div className="text-center">
                       <p className="text-lg mb-2">No function selected</p>
@@ -773,7 +812,7 @@ function RepoPageContent() {
                       <button
                         onClick={handleBackToFileGraph}
                         className="mt-4 px-4 py-2 rounded-lg text-sm cursor-pointer"
-                        style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+                        style={{ background: "#1e1e25", border: "1px solid #2c2c35", color: "#8b949e" }}
                       >
                         Back to file graph
                       </button>
@@ -789,7 +828,7 @@ function RepoPageContent() {
         <div
           className={`${
             isTabletOrMobile 
-              ? "absolute right-0 top-0 bottom-0 z-30 shadow-2xl bg-[#161b22]" 
+              ? "absolute right-0 top-0 bottom-0 z-30 shadow-2xl bg-[#17171d]" 
               : "shrink-0 flex"
           } overflow-hidden`}
           style={{
@@ -814,7 +853,7 @@ function RepoPageContent() {
                   className="hover:bg-blue-500/20 transition-colors group"
                   title="Resize sidebar"
                 >
-                  <div className="h-full group-hover:bg-blue-500 transition-colors" style={{ width: "1px", background: "#21262d" }} />
+                  <div className="h-full group-hover:bg-blue-500 transition-colors" style={{ width: "1px", background: "#23232a" }} />
                 </div>
               )}
               <div
@@ -833,6 +872,11 @@ function RepoPageContent() {
                   onClose={() => setSelectedFile(null)}
                   onFileNavigate={handleFileNavigate}
                   onFunctionClick={handleFunctionClick}
+                  functionsStatus={
+                    selectedFile && fnStatus[selectedFile.id] !== "ready"
+                      ? (fnStatus[selectedFile.id] as "loading" | "error" | undefined)
+                      : undefined
+                  }
                   issueResult={issueResult}
                   codeContent={codeViewerFileId === selectedFile.id ? codeContent : null}
                   onViewSource={handleViewSource}
@@ -840,10 +884,7 @@ function RepoPageContent() {
                   onOpenChat={handleOpenChat}
                   activeTab={sidebarTab}
                   onTabChange={setSidebarTab}
-                  chatMessages={chatMessages}
-                  setChatMessages={setChatMessages}
-                  isChatLoading={isChatLoading}
-                  setIsChatLoading={setIsChatLoading}
+                  chat={chat}
                 />
               </div>
             </>
@@ -864,7 +905,7 @@ function RepoPageContent() {
       {/* ── Trust Banner ─────────────────────────────────────────────────── */}
       {showTrustBanner && (
         <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-4 duration-500 w-auto">
-          <div className="bg-[#161b22] border border-[#30363d] shadow-2xl rounded-xl p-3 pr-10 flex items-center justify-between gap-4 relative">
+          <div className="bg-[#17171d] border border-[#2c2c35] shadow-2xl rounded-xl p-3 pr-10 flex items-center justify-between gap-4 relative">
             <button
               onClick={dismissTrustBanner}
               className="absolute top-1/2 -translate-y-1/2 right-3 p-1 text-[#8b949e] hover:text-[#c9d1d9] transition-colors rounded-md"
@@ -885,7 +926,7 @@ function RepoPageContent() {
               target="_blank"
               rel="noopener noreferrer"
               onClick={dismissTrustBanner}
-              className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-[#21262d] border border-[#30363d] hover:border-[#8b949e] hover:bg-[#30363d] transition-all text-xs font-semibold text-[#c9d1d9] whitespace-nowrap"
+              className="flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg bg-[#23232a] border border-[#2c2c35] hover:border-[#8b949e] hover:bg-[#2c2c35] transition-all text-xs font-semibold text-[#c9d1d9] whitespace-nowrap"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.699-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.418 22 12c0-5.523-4.477-10-10-10z" />
@@ -902,7 +943,7 @@ function RepoPageContent() {
 export default function RepoPage() {
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center h-screen" style={{ background: "#0a0a0f" }}>
+      <div className="flex items-center justify-center h-screen" style={{ background: "#101014" }}>
         <span className="text-sm" style={{ color: "#8b949e" }}>Loading...</span>
       </div>
     }>

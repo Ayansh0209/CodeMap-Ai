@@ -518,18 +518,24 @@ export async function callGeminiForMapping(
 
 export async function callGeminiForChatStream(
     systemInstruction: string,
-    messages: Array<{ role: string; content: string }>
+    messages: Array<{ role: string; content: string }>,
+    thinking: boolean = false
 ) {
     const client = getClient();
     if (!client) throw new Error("Vertex AI client could not be initialized. Please check GCP configuration.");
 
     const model = client.getGenerativeModel({
-        model: "gemini-2.5-pro",
+        // flash, not pro: Pro spends many seconds "thinking" before it emits the
+        // first token — that's why streaming felt frozen then dumped all at once.
+        // Fast mode (thinkingBudget 0) → tokens start almost immediately. "Deep"
+        // mode (-1 = dynamic thinking) lets flash reason longer for complex
+        // questions, still at flash pricing — no need for the much pricier Pro.
+        model: "gemini-2.5-flash",
         systemInstruction: {
             role: "system",
             parts: [{ text: systemInstruction }]
         },
-        generationConfig: { temperature: 0.2 },
+        generationConfig: { temperature: 0.2, thinkingConfig: { thinkingBudget: thinking ? -1 : 0 } } as any,
     });
 
     // MAP ROLES: Gemini only accepts "user" and "model"
@@ -606,11 +612,14 @@ export async function callGeminiForRetrievalReview(
     if (!client) return null;
 
     const model = client.getGenerativeModel({
-        model: "gemini-2.5-pro",
+        // Retrieval review is a fast JSON classification — flash (no thinking)
+        // keeps the optional Stage-2 chat pass cheap instead of a slow Pro call.
+        model: "gemini-2.5-flash",
         generationConfig: {
             temperature: 0,
             responseMimeType: "application/json",
-        },
+            thinkingConfig: { thinkingBudget: 0 },
+        } as any,
     });
 
     const snippetSection = formatSnippetsForPrompt(snippets);

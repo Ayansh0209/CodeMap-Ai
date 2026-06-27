@@ -164,10 +164,10 @@ export default function SearchPanel({
         {/* Main panel */}
         <div
           className="flex-1 flex flex-col overflow-hidden"
-          style={{ background: "#0d1117", borderLeft: "1px solid #30363d" }}
+          style={{ background: "#101014", borderLeft: "1px solid #2c2c35" }}
         >
           {/* Header */}
-          <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: "1px solid #30363d" }}>
+          <div className="flex items-center gap-2 px-4 py-3" style={{ borderBottom: "1px solid #2c2c35" }}>
             <span className="text-base">🔍</span>
             <span className="font-semibold text-sm" style={{ color: "#e6edf3" }}>Search Code</span>
             <span className="text-[11px] ml-auto font-mono" style={{ color: "#484f58" }}>{owner}/{repo}</span>
@@ -187,7 +187,7 @@ export default function SearchPanel({
               onChange={e => handleSearchChange(e.target.value)}
               placeholder="Search files, functions, exports..."
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ background: "#161b22", border: "1px solid #30363d", color: "#e6edf3", fontFamily: "monospace" }}
+              style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#e6edf3", fontFamily: "monospace" }}
             />
             {/* Type filter pills */}
             <div className="flex gap-1 flex-wrap">
@@ -199,7 +199,7 @@ export default function SearchPanel({
                   style={{
                     background: typeFilter === f ? "rgba(88,166,255,0.15)" : "transparent",
                     color: typeFilter === f ? "#58a6ff" : "#8b949e",
-                    border: `1px solid ${typeFilter === f ? "rgba(88,166,255,0.3)" : "#30363d"}`,
+                    border: `1px solid ${typeFilter === f ? "rgba(88,166,255,0.3)" : "#2c2c35"}`,
                   }}
                 >
                   {f === "all" ? "All" : f === "file" ? "Files" : f === "export" ? "Exports" : "Tests"}
@@ -225,7 +225,7 @@ export default function SearchPanel({
                   Find files, exported functions, and test suites.<br />
                   Type at least 2 characters to search.
                 </p>
-                <p className="text-[11px] mt-3" style={{ color: "#30363d" }}>⌘K to toggle</p>
+                <p className="text-[11px] mt-3" style={{ color: "#2c2c35" }}>⌘K to toggle</p>
               </div>
             )}
             {!loading && searchResults.map((r, i) => (
@@ -239,7 +239,7 @@ export default function SearchPanel({
                 }}
                 className="w-full text-left px-3 py-2.5 rounded-lg transition-all group"
                 style={{ border: "1px solid transparent" }}
-                onMouseEnter={e => { e.currentTarget.style.background = "#161b22"; e.currentTarget.style.borderColor = "#30363d"; }}
+                onMouseEnter={e => { e.currentTarget.style.background = "#17171d"; e.currentTarget.style.borderColor = "#2c2c35"; }}
                 onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = "transparent"; }}
               >
                 <div className="flex items-center gap-2">
@@ -253,7 +253,7 @@ export default function SearchPanel({
           </div>
 
           {searchTotal > 0 && (
-            <div className="px-4 py-2 text-[11px] flex justify-between" style={{ borderTop: "1px solid #21262d", color: "#484f58" }}>
+            <div className="px-4 py-2 text-[11px] flex justify-between" style={{ borderTop: "1px solid #23232a", color: "#484f58" }}>
               <span>{searchTotal} results</span>
               <span>⌘K to toggle</span>
             </div>

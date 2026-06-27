@@ -157,15 +157,15 @@ export default function Sidebar({
           className="shrink-0 flex flex-col items-center py-3 gap-3"
           style={{
             width: "40px",
-            background: "#0d1117",
-            borderRight: "1px solid #21262d",
+            background: "#101014",
+            borderRight: "1px solid #23232a",
           }}
         >
           {/* Expand button */}
           <button
             onClick={() => onCollapsedChange(false)}
             className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors"
-            style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+            style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
             title="Expand sidebar"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -196,8 +196,8 @@ export default function Sidebar({
         className="shrink-0 flex flex-col overflow-hidden"
         style={{
           width: `${width}px`,
-          background: "#0d1117",
-          borderRight: "1px solid #21262d",
+          background: "#101014",
+          borderRight: "1px solid #23232a",
         }}
       >
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -208,7 +208,7 @@ export default function Sidebar({
               onClick={() => onCollapsedChange(true)}
               className="w-6 h-6 rounded flex items-center justify-center transition-colors hover:text-white"
               style={{ background: "transparent", color: "#8b949e" }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#21262d"; }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#23232a"; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
               title="Collapse sidebar"
             >
@@ -255,7 +255,7 @@ export default function Sidebar({
                   <button
                     onClick={onIssueClear}
                     className="ml-auto text-[10px] px-2 py-0.5 rounded transition-colors"
-                    style={{ color: "#8b949e", background: "rgba(255,255,255,0.05)", border: "1px solid #30363d" }}
+                    style={{ color: "#8b949e", background: "rgba(255,255,255,0.05)", border: "1px solid #2c2c35" }}
                   >
                     Clear
                   </button>
@@ -277,7 +277,7 @@ export default function Sidebar({
                       key={af.fileId}
                       className="w-full text-left px-2 py-2 rounded-lg transition-colors"
                       style={{ background: "transparent" }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#161b22"; }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#17171d"; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                       onClick={() => {
                         onZoomToNode(af.fileId);
@@ -311,7 +311,7 @@ export default function Sidebar({
           ) : (
             <>
               {/* ── Quick Start ───────────────────────────────────────────── */}
-              <div className="rounded-xl p-3" style={{ background: "#161b22", border: "1px solid #21262d" }}>
+              <div className="rounded-xl p-3" style={{ background: "#17171d", border: "1px solid #23232a" }}>
                 <div className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#8b949e" }}>
                   Quick Start
                 </div>
@@ -363,11 +363,11 @@ export default function Sidebar({
                 {!isArchitectureLoading && !architectureError && modules.map((m) => {
                   const isExpanded = !!expandedModules[m.id];
                   return (
-                    <div key={m.id} className="rounded-xl overflow-hidden" style={{ border: "1px solid #21262d", background: "#161b22" }}>
+                    <div key={m.id} className="rounded-xl overflow-hidden" style={{ border: "1px solid #23232a", background: "#17171d" }}>
                       {/* Module Header Button */}
                       <button
                         onClick={() => toggleModule(m.id)}
-                        className="w-full text-left p-2.5 transition-colors flex items-start gap-2 hover:bg-[#21262d]"
+                        className="w-full text-left p-2.5 transition-colors flex items-start gap-2 hover:bg-[#23232a]"
                         style={{ background: "transparent" }}
                       >
                         {/* Chevron */}
@@ -384,7 +384,7 @@ export default function Sidebar({
                             <span className="text-xs font-semibold truncate" style={{ color: "#e6edf3" }}>
                               {m.name}
                             </span>
-                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#21262d", color: "#8b949e" }}>
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full shrink-0" style={{ background: "#23232a", color: "#8b949e" }}>
                               {m.files.length}
                             </span>
                           </div>
@@ -398,7 +398,7 @@ export default function Sidebar({
 
                       {/* Nested Files List */}
                       {isExpanded && (
-                        <div className="border-t px-2 py-1.5 space-y-0.5" style={{ borderColor: "#21262d", background: "#0d1117" }}>
+                        <div className="border-t px-2 py-1.5 space-y-0.5" style={{ borderColor: "#23232a", background: "#101014" }}>
                           {(() => {
                             const repFiles = m.representativeFiles || [];
                             const repList = m.files.filter((f) => repFiles.includes(f));
@@ -424,7 +424,7 @@ export default function Sidebar({
                                         onFileSelect(file);
                                         onZoomToNode(file.id);
                                       }}
-                                      className="w-full text-left px-2 py-1 rounded text-[11px] truncate transition-colors flex items-center justify-between hover:bg-[#161b22]"
+                                      className="w-full text-left px-2 py-1 rounded text-[11px] truncate transition-colors flex items-center justify-between hover:bg-[#17171d]"
                                       style={{
                                         color: isRepresentative ? "#e3b341" : "#e6edf3",
                                         fontFamily: "var(--font-geist-mono), monospace"
@@ -447,8 +447,8 @@ export default function Sidebar({
                                       ...prev,
                                       [m.id]: (prev[m.id] || defaultPageSize) + 100
                                     }))}
-                                    className="w-full text-center py-1 mt-1 border border-dashed rounded text-[10px] hover:bg-[#161b22] transition-colors"
-                                    style={{ borderColor: "#30363d", color: "#8b949e" }}
+                                    className="w-full text-center py-1 mt-1 border border-dashed rounded text-[10px] hover:bg-[#17171d] transition-colors"
+                                    style={{ borderColor: "#2c2c35", color: "#8b949e" }}
                                   >
                                     Show more (+100 files, {sortedFiles.length - limit} remaining)
                                   </button>
@@ -464,10 +464,10 @@ export default function Sidebar({
               </div>
 
               {/* ── Advanced Insights Collapsible ───────────────────────── */}
-              <div className="rounded-xl overflow-hidden mt-4" style={{ border: "1px solid #21262d", background: "#161b22" }}>
+              <div className="rounded-xl overflow-hidden mt-4" style={{ border: "1px solid #23232a", background: "#17171d" }}>
                 <button
                   onClick={() => setAdvancedInsightsExpanded(prev => !prev)}
-                  className="w-full text-left p-2.5 transition-colors flex items-center gap-2 hover:bg-[#21262d]"
+                  className="w-full text-left p-2.5 transition-colors flex items-center gap-2 hover:bg-[#23232a]"
                   style={{ background: "transparent" }}
                 >
                   <span
@@ -484,7 +484,7 @@ export default function Sidebar({
                 </button>
 
                 {advancedInsightsExpanded && (
-                  <div className="p-2.5 border-t space-y-4" style={{ borderColor: "#21262d", background: "#0d1117" }}>
+                  <div className="p-2.5 border-t space-y-4" style={{ borderColor: "#23232a", background: "#101014" }}>
 
 
                     {/* ── Most Connected ────────────────────────────────────────── */}
@@ -500,7 +500,7 @@ export default function Sidebar({
                               onClick={() => { onFileSelect(file); onZoomToNode(file.id); }}
                               className="w-full text-left px-2 py-1.5 rounded-lg text-[11px] truncate transition-colors flex items-center gap-2"
                               style={{ color: "#e6edf3", fontFamily: "var(--font-geist-mono), monospace" }}
-                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#161b22"; }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "#17171d"; }}
                               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                             >
                               <span className="truncate flex-1">{file.label}</span>

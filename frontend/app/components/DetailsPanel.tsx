@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import type {
   FileNodeDTO,
   ImportEdgeDTO,
   FunctionNodeDTO,
   FunctionFilePayload,
   IssueMapResult,
+  StructureNodeDTO,
 } from "../lib/types";
 import {
   makeGitHubFileLink,
@@ -15,6 +17,8 @@ import {
 import { functionMarker } from "../lib/functionMarker";
 import CodeViewer from "./CodeViewer";
 import AIChatTab from "./AIChatTab";
+import FunctionCodePeek from "./FunctionCodePeek";
+import type { ChatController } from "../hooks/useChatSessions";
 
 interface DetailsPanelProps {
   file: FileNodeDTO | null;
@@ -26,6 +30,9 @@ interface DetailsPanelProps {
   onClose: () => void;
   onFileNavigate: (fileId: string) => void;
   onFunctionClick: (fn: FunctionNodeDTO) => void;
+  // Loading state for THIS file's (lazy-loaded) functions: "loading" while the
+  // analysis is still writing them in the background, "error" if the fetch failed.
+  functionsStatus?: "loading" | "error";
   issueResult?: IssueMapResult | null;
   // Code viewer
   codeContent?: string | null;
@@ -36,10 +43,8 @@ interface DetailsPanelProps {
   // Tabs & Chat State
   activeTab?: "info" | "code" | "ai";
   onTabChange?: (tab: "info" | "code" | "ai") => void;
-  chatMessages?: { role: "user" | "assistant"; content: string; }[];
-  setChatMessages?: React.Dispatch<React.SetStateAction<{ role: "user" | "assistant"; content: string; }[]>>;
-  isChatLoading?: boolean;
-  setIsChatLoading?: (val: boolean) => void;
+  // On-device chat sessions controller (history lives in the browser).
+  chat?: ChatController;
 }
 
 export default function DetailsPanel({
@@ -52,6 +57,7 @@ export default function DetailsPanel({
   onClose,
   onFileNavigate,
   onFunctionClick,
+  functionsStatus,
   issueResult,
   codeContent,
   onViewSource,
@@ -59,11 +65,10 @@ export default function DetailsPanel({
   onOpenChat,
   activeTab = "info",
   onTabChange,
-  chatMessages,
-  setChatMessages,
-  isChatLoading,
-  setIsChatLoading,
+  chat,
 }: DetailsPanelProps) {
+  // Which function rows have their inline code expanded (keyed per row).
+  const [openCode, setOpenCode] = useState<Set<string>>(new Set());
   if (!file) return null;
 
   // imports FROM this file (outgoing)
@@ -78,6 +83,34 @@ export default function DetailsPanel({
   const functionData = functionFiles?.[sanitizedId] ?? null;
   const functions = functionData?.functions ?? [];
 
+  // A structure (class / type / table / interface) has no call edges of its
+  // own, but it CAN be referenced by functions. Convert it to a function-shaped
+  // node so clicking it opens the same drill-down view as a function (previously
+  // structures were dead — only functions were clickable). "Used by" is resolved
+  // best-effort from the call graph; calls is empty since structures don't call.
+  const openStructure = (s: StructureNodeDTO) => {
+    const calledBy: string[] = [];
+    if (functionFiles) {
+      for (const payload of Object.values(functionFiles)) {
+        for (const fn of payload.functions) {
+          if (fn.calls.includes(s.id)) calledBy.push(fn.id);
+        }
+      }
+    }
+    onFunctionClick({
+      id: s.id,
+      name: s.name,
+      filePath: s.filePath,
+      startLine: s.startLine,
+      endLine: s.endLine,
+      isExported: s.isExported,
+      kind: "structure",
+      calls: [],
+      calledBy,
+      analysisConfidence: "medium",
+    });
+  };
+
   // ── Issue context for this file ─────────────────────────────────────────
   const fileIssueHit = issueResult?.affectedFiles.find(f => f.fileId === file.id) ?? null;
 
@@ -85,14 +118,14 @@ export default function DetailsPanel({
     <div
       className="h-full flex flex-col overflow-hidden"
       style={{
-        background: "#161b22",
+        background: "#17171d",
       }}
     >
       {/* Header */}
       <div
         className="shrink-0 p-4 pb-2 flex items-start justify-between gap-3 z-10"
         style={{
-          background: "rgba(22,27,34,1)",
+          background: "rgba(23,23,29,1)",
         }}
       >
         <div className="min-w-0">
@@ -132,7 +165,7 @@ export default function DetailsPanel({
       </div>
 
       {/* Tabs */}
-      <div className="shrink-0 flex gap-4 px-4 border-b" style={{ borderColor: "#30363d", background: "rgba(22,27,34,1)" }}>
+      <div className="shrink-0 flex gap-4 px-4 border-b" style={{ borderColor: "#2c2c35", background: "rgba(23,23,29,1)" }}>
         <button 
           onClick={() => onTabChange?.("info")}
           className={`pb-2 text-sm font-medium border-b-2 transition-colors ${activeTab === "info" ? "border-blue-500 text-blue-400" : "border-transparent text-[#8b949e] hover:text-[#c9d1d9]"}`}
@@ -257,7 +290,7 @@ export default function DetailsPanel({
         {file.kind === "test" && (
           <section>
             <SectionHeader>Test Intelligence</SectionHeader>
-            <div className="rounded-lg p-3 text-xs space-y-3" style={{ background: "#0d1117", border: "1px dashed #3fb950" }}>
+            <div className="rounded-lg p-3 text-xs space-y-3" style={{ background: "#101014", border: "1px dashed #3fb950" }}>
               <div className="flex gap-4">
                 <div>
                   <span style={{ color: "#8b949e", fontWeight: 600 }}>TEST SUITES </span>
@@ -299,8 +332,35 @@ export default function DetailsPanel({
             <EmptyMessage>
               Function data unavailable — file was too large for full parse
             </EmptyMessage>
+          ) : functions.length === 0 && functionsStatus === "loading" ? (
+            <div
+              className="rounded-lg p-4 flex flex-col items-center text-center gap-2"
+              style={{ background: "#101014", border: "1px dashed #2c2c35" }}
+            >
+              <span
+                className="inline-block w-5 h-5 border-2 rounded-full animate-spin"
+                style={{ borderColor: "rgba(240,136,62,0.25)", borderTopColor: "#f0883e" }}
+              />
+              <div className="text-xs font-medium" style={{ color: "#e6edf3" }}>
+                Indexing functions…
+              </div>
+              <div className="text-[11px]" style={{ color: "#8b949e" }}>
+                The graph loads first; this file&apos;s functions are still being
+                prepared in the background. One moment.
+              </div>
+            </div>
+          ) : functions.length === 0 && functionsStatus === "error" ? (
+            <div
+              className="rounded-lg p-3 text-xs"
+              style={{ background: "rgba(248,81,73,0.06)", border: "1px solid rgba(248,81,73,0.3)" }}
+            >
+              <div className="font-medium" style={{ color: "#f85149" }}>Couldn&apos;t load functions</div>
+              <div className="mt-0.5" style={{ color: "#8b949e" }}>
+                Something went wrong fetching this file&apos;s functions. Click the file again to retry.
+              </div>
+            </div>
           ) : functions.length === 0 && (!file.structures || file.structures.length === 0) ? (
-            <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: "#0d1117", border: "1px dashed #30363d" }}>
+            <div className="rounded-lg p-3 text-xs space-y-1" style={{ background: "#101014", border: "1px dashed #2c2c35" }}>
               <div style={{ color: "#8b949e" }}>No functions or structures detected in this file.</div>
               <div style={{ color: "#484f58" }}>
                 {file.language === "javascript"
@@ -317,71 +377,100 @@ export default function DetailsPanel({
               className="space-y-1 overflow-y-auto pr-1"
               style={{ maxHeight: "300px" }}
             >
-              {functions.map((fn) => (
-                <button
-                  key={fn.id}
-                  className="w-full text-left py-2 px-2.5 rounded-lg transition-colors flex items-center gap-2"
-                  style={{
-                    background: "transparent",
-                    color: "#e6edf3",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = "#1c2128";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.background = "transparent";
-                  }}
-                  onClick={() => onFunctionClick(fn)}
-                >
-                  {/* Name */}
-                  <span
-                    className="text-sm font-semibold truncate flex-1"
-                    style={{
-                      fontFamily: "var(--font-geist-mono), monospace",
-                      color: "#e6edf3",
-                    }}
-                  >
-                    {fn.name}
-                  </span>
-
-                  {/* Kind badge */}
-                  <span
-                    className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
-                    style={{
-                      background: getKindBadgeColor(fn.kind),
-                      color: "#e6edf3",
-                    }}
-                  >
-                    {fn.name.startsWith("describe") ? "suite" : (fn.name.startsWith("it") || fn.name.startsWith("test(")) ? "test case" : getKindBadge(fn.kind)}
-                  </span>
-
-                  {/* Line range */}
-                  <span
-                    className="text-[10px] shrink-0"
-                    style={{ color: "#484f58" }}
-                  >
-                    L{fn.startLine}-{fn.endLine}
-                  </span>
-
-                  {/* Language-aware marker badge (exp / exported / static / private / decl) */}
-                  {(() => {
-                    const marker = functionMarker({
-                      isExported: fn.isExported,
-                      isDeclaration: fn.isDeclaration,
-                      filePath: fn.filePath,
-                    });
-                    return marker ? (
+              {functions.map((fn, i) => {
+                const codeKey = `${fn.id}#${i}`;
+                const codeOpen = openCode.has(codeKey);
+                return (
+                  <div key={`${fn.id}@${fn.startLine}#${i}`}>
+                    <div
+                      role="button"
+                      className="w-full text-left py-2 px-2.5 rounded-lg transition-colors flex items-center gap-2 cursor-pointer"
+                      style={{ background: codeOpen ? "#1e1e25" : "transparent", color: "#e6edf3" }}
+                      onMouseEnter={(e) => { if (!codeOpen) (e.currentTarget as HTMLElement).style.background = "#1e1e25"; }}
+                      onMouseLeave={(e) => { if (!codeOpen) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                      onClick={() => onFunctionClick(fn)}
+                    >
+                      {/* Name */}
                       <span
-                        className="text-[9px] px-1 py-0.5 rounded shrink-0"
-                        style={{ background: marker.bg, color: marker.color }}
-                        title={marker.title}
+                        className="text-sm font-semibold truncate flex-1"
+                        style={{
+                          fontFamily: "var(--font-geist-mono), monospace",
+                          color: "#e6edf3",
+                        }}
                       >
-                        {marker.label}
+                        {fn.name}
                       </span>
-                    ) : null;
-                  })()}
-                </button>
-              ))}
+
+                      {/* Kind badge */}
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                        style={{
+                          background: getKindBadgeColor(fn.kind),
+                          color: "#e6edf3",
+                        }}
+                      >
+                        {fn.name.startsWith("describe") ? "suite" : (fn.name.startsWith("it") || fn.name.startsWith("test(")) ? "test case" : getKindBadge(fn.kind)}
+                      </span>
+
+                      {/* Line range */}
+                      <span
+                        className="text-[10px] shrink-0"
+                        style={{ color: "#484f58" }}
+                      >
+                        L{fn.startLine}-{fn.endLine}
+                      </span>
+
+                      {/* Language-aware marker badge (exp / exported / static / private / decl) */}
+                      {(() => {
+                        const marker = functionMarker({
+                          isExported: fn.isExported,
+                          isDeclaration: fn.isDeclaration,
+                          filePath: fn.filePath,
+                        });
+                        return marker ? (
+                          <span
+                            className="text-[9px] px-1 py-0.5 rounded shrink-0"
+                            style={{ background: marker.bg, color: marker.color }}
+                            title={marker.title}
+                          >
+                            {marker.label}
+                          </span>
+                        ) : null;
+                      })()}
+
+                      {/* Inline "show code" toggle (doesn't trigger row navigation) */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenCode((prev) => {
+                            const n = new Set(prev);
+                            if (n.has(codeKey)) n.delete(codeKey); else n.add(codeKey);
+                            return n;
+                          });
+                        }}
+                        title={codeOpen ? "Hide code" : "Show code"}
+                        className="shrink-0 w-6 h-6 rounded flex items-center justify-center transition-colors"
+                        style={{ color: codeOpen ? "#58a6ff" : "#8b949e", background: codeOpen ? "rgba(88,166,255,0.12)" : "transparent" }}
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+                        </svg>
+                      </button>
+                    </div>
+
+                    {codeOpen && (
+                      <FunctionCodePeek
+                        owner={owner}
+                        repo={repo}
+                        commitSha={commitSha}
+                        filePath={fn.filePath}
+                        startLine={fn.startLine}
+                        endLine={fn.endLine}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -391,11 +480,15 @@ export default function DetailsPanel({
           <section>
             <SectionHeader>Structures ({file.structures.length})</SectionHeader>
             <div className="space-y-1 overflow-y-auto pr-1" style={{ maxHeight: "200px" }}>
-              {file.structures.map((s) => (
-                <div
-                  key={s.id}
-                  className="w-full text-left py-2 px-2.5 rounded-lg flex items-center gap-2 group transition-colors"
-                  style={{ background: "rgba(30,35,41,0.5)", border: "1px solid #30363d" }}
+              {file.structures.map((s, i) => (
+                <button
+                  key={`${s.id}#${i}`}
+                  onClick={() => openStructure(s)}
+                  title={`Open ${s.name}`}
+                  className="w-full text-left py-2 px-2.5 rounded-lg flex items-center gap-2 group transition-colors cursor-pointer"
+                  style={{ background: "rgba(30,35,41,0.5)", border: "1px solid #2c2c35" }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(56,139,253,0.12)"; (e.currentTarget as HTMLElement).style.borderColor = "rgba(56,139,253,0.4)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "rgba(30,35,41,0.5)"; (e.currentTarget as HTMLElement).style.borderColor = "#2c2c35"; }}
                 >
                   <span
                     className="text-xs truncate flex-1"
@@ -409,14 +502,17 @@ export default function DetailsPanel({
                   <span
                     className="text-[9px] px-1.5 py-0.5 rounded font-medium shrink-0"
                     style={{
-                      background: "rgba(139,148,158,0.1)",
-                      color: "#8b949e",
-                      border: "1px solid #30363d"
+                      background: s.kind === "interface" ? "rgba(121,192,255,0.12)" : s.kind === "type" ? "rgba(210,168,255,0.12)" : "rgba(139,148,158,0.1)",
+                      color: s.kind === "interface" ? "#79c0ff" : s.kind === "type" ? "#d2a8ff" : "#8b949e",
+                      border: "1px solid #2c2c35"
                     }}
                   >
-                    STRUCTURE
+                    {s.kind === "interface" ? "interface" : s.kind === "type" ? "type" : "structure"}
                   </span>
-                </div>
+                  <svg className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </button>
               ))}
             </div>
           </section>
@@ -435,7 +531,7 @@ export default function DetailsPanel({
                     className="w-full text-left text-sm py-1.5 px-2 rounded-lg transition-colors flex items-center gap-2"
                     style={{ color: "#e6edf3" }}
                     onMouseEnter={(ev) => {
-                      (ev.currentTarget as HTMLElement).style.background = "#1c2128";
+                      (ev.currentTarget as HTMLElement).style.background = "#1e1e25";
                     }}
                     onMouseLeave={(ev) => {
                       (ev.currentTarget as HTMLElement).style.background = "transparent";
@@ -504,7 +600,7 @@ export default function DetailsPanel({
                     className="w-full text-left text-sm py-1.5 px-2 rounded-lg transition-colors flex items-center gap-2"
                     style={{ color: "#e6edf3" }}
                     onMouseEnter={(ev) => {
-                      (ev.currentTarget as HTMLElement).style.background = "#1c2128";
+                      (ev.currentTarget as HTMLElement).style.background = "#1e1e25";
                     }}
                     onMouseLeave={(ev) => {
                       (ev.currentTarget as HTMLElement).style.background = "transparent";
@@ -553,7 +649,7 @@ export default function DetailsPanel({
                   key={i}
                   className="text-xs px-2 py-1 rounded-md"
                   style={{
-                    background: "#1c2128",
+                    background: "#1e1e25",
                     color: "#8b949e",
                     fontFamily: "var(--font-geist-mono), monospace",
                   }}
@@ -574,8 +670,8 @@ export default function DetailsPanel({
             rel="noopener noreferrer"
             className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-medium transition-colors hover:opacity-90"
             style={{
-              background: "#1c2128",
-              border: "1px solid #30363d",
+              background: "#1e1e25",
+              border: "1px solid #2c2c35",
               color: "#e6edf3",
             }}
           >
@@ -626,7 +722,7 @@ export default function DetailsPanel({
                   <button
                     onClick={onViewSource}
                     className="px-4 py-2 rounded-lg transition-colors"
-                    style={{ background: "#21262d", border: "1px solid #30363d", color: "#c9d1d9" }}
+                    style={{ background: "#23232a", border: "1px solid #2c2c35", color: "#c9d1d9" }}
                   >
                     Load Source
                   </button>
@@ -636,7 +732,7 @@ export default function DetailsPanel({
           </div>
         )}
 
-        {activeTab === "ai" && chatMessages && setChatMessages && setIsChatLoading && (
+        {activeTab === "ai" && chat && (
           <div className="h-full">
             <AIChatTab
               owner={owner}
@@ -645,10 +741,7 @@ export default function DetailsPanel({
               issueNumber={issueResult?.issueNumber}
               fileId={file.id}
               currentFileId={file.id}
-              messages={chatMessages}
-              setMessages={setChatMessages}
-              isLoading={!!isChatLoading}
-              setIsLoading={setIsChatLoading}
+              chat={chat}
             />
           </div>
         )}
@@ -680,7 +773,7 @@ function EmptyMessage({ children }: { children: React.ReactNode }) {
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="py-1.5 px-2 rounded-lg" style={{ background: "#0d1117" }}>
+    <div className="py-1.5 px-2 rounded-lg" style={{ background: "#101014" }}>
       <div
         className="text-[10px] uppercase tracking-wider"
         style={{ color: "#8b949e" }}

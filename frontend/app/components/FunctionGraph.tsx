@@ -11,6 +11,7 @@ import {
   sanitizeFileId,
 } from "../lib/graphHelpers";
 import { functionMarker } from "../lib/functionMarker";
+import FunctionCodePeek from "./FunctionCodePeek";
 
 interface FunctionGraphProps {
   selectedFunction: FunctionNodeDTO;
@@ -21,6 +22,9 @@ interface FunctionGraphProps {
   onFunctionNavigate: (fn: FunctionNodeDTO) => void;
   onBackToFileGraph: () => void;
   onBackToFile?: () => void;
+  // Files that import THIS function's file — used to honestly explain an
+  // exported function with no tracked callers (it's used as a value, not called).
+  importedByFiles?: string[];
 }
 
 // ── Resolve function IDs to FunctionNodeDTO objects ───────────────────────────
@@ -52,6 +56,7 @@ export default function FunctionGraph({
   onFunctionNavigate,
   onBackToFileGraph,
   onBackToFile,
+  importedByFiles = [],
 }: FunctionGraphProps) {
   // Resolve callers and callees
   const { callers, callees } = useMemo(() => {
@@ -89,8 +94,10 @@ export default function FunctionGraph({
   const [callerPage, setCallerPage] = useState(0);
   const [calleePage, setCalleePage] = useState(0);
 
-  // Reset pages when function changes
-  useMemo(() => { setCallerPage(0); setCalleePage(0); }, [selectedFunction.id]);
+  const [showCode, setShowCode] = useState(false);
+
+  // Reset pages + collapse the inline code when the focused function changes
+  useMemo(() => { setCallerPage(0); setCalleePage(0); setShowCode(false); }, [selectedFunction.id]);
 
   const callerTotalPages = Math.ceil(callers.length / PAGE_SIZE);
   const calleeTotalPages = Math.ceil(callees.length / PAGE_SIZE);
@@ -102,7 +109,7 @@ export default function FunctionGraph({
       {/* ── Top bar: Back + Breadcrumb ────────────────────────────────────── */}
       <div
         className="flex items-center gap-3 px-2 py-2 flex-wrap shrink-0"
-        style={{ borderBottom: "1px solid #21262d" }}
+        style={{ borderBottom: "1px solid #23232a" }}
       >
         {/* Back buttons */}
         <div className="flex items-center gap-2">
@@ -110,7 +117,7 @@ export default function FunctionGraph({
             id="back-to-file-graph-btn"
             onClick={onBackToFileGraph}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-            style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+            style={{ background: "#1e1e25", border: "1px solid #2c2c35", color: "#8b949e" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -122,7 +129,7 @@ export default function FunctionGraph({
               id="back-to-file-btn"
               onClick={onBackToFile}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-              style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+              style={{ background: "#1e1e25", border: "1px solid #2c2c35", color: "#8b949e" }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -174,11 +181,29 @@ export default function FunctionGraph({
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {callers.length === 0 ? (
-              <EmptyState>Not called by any tracked function</EmptyState>
+              selectedFunction.kind === "structure" ? (
+                <UsedByPanel
+                  heading="Structure, not a function"
+                  color="#f0883e"
+                  note={`${selectedFunction.name} is ${selectedFunction.isExported ? "an exported value" : "a top-level value"} — a router, schema, table, or config. It's referenced where it's used, not "called".`}
+                  files={importedByFiles}
+                />
+              ) : selectedFunction.isRecovered ? (
+                <EmptyState>Caller analysis incomplete — this file couldn&apos;t be fully parsed</EmptyState>
+              ) : selectedFunction.isExported && importedByFiles.length > 0 ? (
+                <UsedByPanel
+                  heading={`Exported · used by ${importedByFiles.length} file${importedByFiles.length > 1 ? "s" : ""}`}
+                  color="#3fb950"
+                  note="No tracked function calls it directly — it's imported and used as a value (a plugin, callback, or re-export). Changing it can still affect these files:"
+                  files={importedByFiles}
+                />
+              ) : (
+                <EmptyState>Not called by any tracked function</EmptyState>
+              )
             ) : (
-              displayedCallers.map((fn) => (
+              displayedCallers.map((fn, i) => (
                 <FunctionCard
-                  key={fn.id}
+                  key={`${fn.id}#${i}`}
                   fn={fn}
                   borderColor="#3fb950"
                   onClick={() => onFunctionNavigate(fn)}
@@ -189,12 +214,12 @@ export default function FunctionGraph({
 
           {/* Caller pagination */}
           {callerTotalPages > 1 && (
-            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #21262d" }}>
+            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #23232a" }}>
               <button
                 onClick={() => setCallerPage(p => Math.max(0, p - 1))}
                 disabled={callerPage === 0}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 ← Prev
               </button>
@@ -205,7 +230,7 @@ export default function FunctionGraph({
                 onClick={() => setCallerPage(p => Math.min(callerTotalPages - 1, p + 1))}
                 disabled={callerPage >= callerTotalPages - 1}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 Next →
               </button>
@@ -231,7 +256,7 @@ export default function FunctionGraph({
             style={{
               minWidth: "220px",
               maxWidth: "100%",
-              background: "#1c2128",
+              background: "#1e1e25",
               border: "2px solid #f0883e",
               boxShadow: "0 0 20px rgba(240,136,62,0.15)",
             }}
@@ -308,35 +333,76 @@ export default function FunctionGraph({
                   {selectedFunction.visibility}
                 </span>
               )}
+              {selectedFunction.isRecovered && (
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded"
+                  style={{
+                    background: "rgba(245,158,11,0.12)",
+                    color: "#f0883e",
+                  }}
+                  title="This function's body couldn't be fully parsed (macro-heavy code). It was recovered heuristically, so its callers and callees may be incomplete."
+                >
+                  ⚠ partial analysis
+                </span>
+              )}
             </div>
           </div>
 
-          {/* GitHub link */}
-          <a
-            id="function-github-link"
-            href={githubLineLink}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
-            style={{
-              background: "#1c2128",
-              border: "1px solid #30363d",
-              color: "#e6edf3",
-            }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 16 16"
-              fill="currentColor"
+          {/* GitHub link + inline "show code" */}
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <a
+              id="function-github-link"
+              href={githubLineLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
+              style={{
+                background: "#1e1e25",
+                border: "1px solid #2c2c35",
+                color: "#e6edf3",
+              }}
             >
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-            </svg>
-            Open in GitHub
-            <span style={{ color: "#484f58" }}>
-              L{selectedFunction.startLine}–L{selectedFunction.endLine}
-            </span>
-          </a>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+              </svg>
+              Open in GitHub
+              <span style={{ color: "#484f58" }}>
+                L{selectedFunction.startLine}–L{selectedFunction.endLine}
+              </span>
+            </a>
+            <button
+              onClick={() => setShowCode((v) => !v)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
+              style={{
+                background: showCode ? "rgba(88,166,255,0.12)" : "#1e1e25",
+                border: `1px solid ${showCode ? "rgba(88,166,255,0.4)" : "#2c2c35"}`,
+                color: showCode ? "#58a6ff" : "#e6edf3",
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
+              </svg>
+              {showCode ? "Hide code" : "Show code"}
+            </button>
+          </div>
+
+          {showCode && (
+            <div className="w-full max-w-lg">
+              <FunctionCodePeek
+                owner={owner}
+                repo={repo}
+                commitSha={commitSha}
+                filePath={selectedFunction.filePath}
+                startLine={selectedFunction.startLine}
+                endLine={selectedFunction.endLine}
+              />
+            </div>
+          )}
 
           {callees.length > 0 && (
             <div className="text-xs" style={{ color: "#484f58" }}>
@@ -359,11 +425,23 @@ export default function FunctionGraph({
 
           <div className="flex-1 overflow-y-auto space-y-2 pr-1">
             {callees.length === 0 ? (
-              <EmptyState>Does not call any tracked functions</EmptyState>
+              selectedFunction.kind === "structure" ? (
+                <div className="rounded-lg p-3 text-xs" style={{ background: "rgba(240,136,62,0.06)", border: "1px solid rgba(240,136,62,0.2)" }}>
+                  <div className="text-[11px] leading-relaxed" style={{ color: "#8b949e" }}>
+                    A structure groups values — its internals aren&apos;t tracked as a call graph.
+                  </div>
+                </div>
+              ) : (
+                <EmptyState>
+                  {selectedFunction.isRecovered
+                    ? "Callee analysis incomplete — this file couldn't be fully parsed"
+                    : "Does not call any tracked functions"}
+                </EmptyState>
+              )
             ) : (
-              displayedCallees.map((fn) => (
+              displayedCallees.map((fn, i) => (
                 <FunctionCard
-                  key={fn.id}
+                  key={`${fn.id}#${i}`}
                   fn={fn}
                   borderColor="#58a6ff"
                   onClick={() => onFunctionNavigate(fn)}
@@ -374,12 +452,12 @@ export default function FunctionGraph({
 
           {/* Callee pagination */}
           {calleeTotalPages > 1 && (
-            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #21262d" }}>
+            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #23232a" }}>
               <button
                 onClick={() => setCalleePage(p => Math.max(0, p - 1))}
                 disabled={calleePage === 0}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 ← Prev
               </button>
@@ -390,7 +468,7 @@ export default function FunctionGraph({
                 onClick={() => setCalleePage(p => Math.min(calleeTotalPages - 1, p + 1))}
                 disabled={calleePage >= calleeTotalPages - 1}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 Next →
               </button>
@@ -420,7 +498,7 @@ function FunctionCard({
     <button
       className="w-full text-left rounded-xl p-3 transition-all hover:scale-[1.02]"
       style={{
-        background: "#161b22",
+        background: "#17171d",
         border: `1px solid ${borderColor}`,
         borderLeftWidth: "3px",
       }}
@@ -490,12 +568,47 @@ function EmptyState({ children }: { children: React.ReactNode }) {
     <div
       className="rounded-xl p-4 text-center text-sm italic"
       style={{
-        background: "#161b22",
-        border: "1px dashed #30363d",
+        background: "#17171d",
+        border: "1px dashed #2c2c35",
         color: "#484f58",
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// Honest "this isn't called, but it IS used" panel — for exported functions used
+// as values, and for structures (routers/schemas/configs) where the call-graph
+// framing doesn't apply.
+function UsedByPanel({
+  heading,
+  color,
+  note,
+  files,
+}: {
+  heading: string;
+  color: string;
+  note: string;
+  files: string[];
+}) {
+  return (
+    <div className="rounded-lg p-3 text-xs space-y-2" style={{ background: `${color}10`, border: `1px solid ${color}40` }}>
+      <div className="flex items-center gap-1.5 font-semibold" style={{ color }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+        {heading}
+      </div>
+      <div className="text-[11px] leading-relaxed" style={{ color: "#8b949e" }}>{note}</div>
+      {files.length > 0 && (
+        <div className="space-y-0.5">
+          {files.slice(0, 6).map((f) => (
+            <div key={f} className="font-mono text-[11px] truncate" style={{ color: "#79c0ff" }} title={f}>
+              {f.split("/").pop()} <span style={{ color: "#484f58" }}>· {f}</span>
+            </div>
+          ))}
+          {files.length > 6 && <div className="text-[10px]" style={{ color: "#484f58" }}>+{files.length - 6} more</div>}
+        </div>
+      )}
     </div>
   );
 }
