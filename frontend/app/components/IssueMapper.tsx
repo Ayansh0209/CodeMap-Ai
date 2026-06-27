@@ -125,8 +125,8 @@ export default function IssueMapper({
     <div
       className="rounded-xl p-3 space-y-2.5"
       style={{
-        background: "#0d1117",
-        border: "1px solid #30363d",
+        background: "#101014",
+        border: "1px solid #2c2c35",
         marginBottom: "12px",
       }}
     >
@@ -146,7 +146,7 @@ export default function IssueMapper({
             style={{
               color: "#8b949e",
               background: "rgba(255,255,255,0.05)",
-              border: "1px solid #30363d",
+              border: "1px solid #2c2c35",
             }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = "#e6edf3"; }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = "#8b949e"; }}
@@ -167,8 +167,8 @@ export default function IssueMapper({
           placeholder="Paste issue URL or number..."
           className="flex-1 px-2.5 py-1.5 rounded-lg text-xs outline-none"
           style={{
-            background: "#161b22",
-            border: `1px solid ${displayError ? "#f85149" : "#30363d"}`,
+            background: "#17171d",
+            border: `1px solid ${displayError ? "#f85149" : "#2c2c35"}`,
             color: "#e6edf3",
             fontFamily: "monospace",
             minWidth: 0,

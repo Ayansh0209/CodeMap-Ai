@@ -97,12 +97,12 @@ export default function CodeViewer({
   };
 
   return (
-    <div className="rounded-xl overflow-hidden flex flex-col h-full" style={{ background: "#0d1117", border: "1px solid #30363d" }}>
+    <div className="rounded-xl overflow-hidden flex flex-col h-full" style={{ background: "#101014", border: "1px solid #2c2c35" }}>
       {/* Title bar */}
       {title && (
         <div
           className="flex items-center justify-between px-3 py-2 text-xs font-medium"
-          style={{ background: "#161b22", borderBottom: "1px solid #21262d", color: "#8b949e" }}
+          style={{ background: "#17171d", borderBottom: "1px solid #23232a", color: "#8b949e" }}
         >
           <div className="flex items-center gap-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

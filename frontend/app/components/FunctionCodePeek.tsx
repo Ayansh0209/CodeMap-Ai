@@ -65,10 +65,10 @@ export default function FunctionCodePeek({
   }, [owner, repo, commitSha, filePath, startLine, endLine]);
 
   return (
-    <div className="rounded-lg overflow-hidden mt-2" style={{ background: "#0d1117", border: "1px solid #21262d" }}>
+    <div className="rounded-lg overflow-hidden mt-2" style={{ background: "#101014", border: "1px solid #23232a" }}>
       <div
         className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px]"
-        style={{ background: "#161b22", borderBottom: "1px solid #21262d", color: "#8b949e", fontFamily: "var(--font-geist-mono), monospace" }}
+        style={{ background: "#17171d", borderBottom: "1px solid #23232a", color: "#8b949e", fontFamily: "var(--font-geist-mono), monospace" }}
       >
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M16 18l6-6-6-6M8 6l-6 6 6 6" />
@@ -78,7 +78,7 @@ export default function FunctionCodePeek({
       <div className="overflow-auto" style={{ maxHeight: 260 }}>
         {state.status === "loading" ? (
           <div className="flex items-center gap-2 px-3 py-4 text-[11px]" style={{ color: "#8b949e" }}>
-            <span className="inline-block w-3.5 h-3.5 border-2 rounded-full animate-spin" style={{ borderColor: "#30363d", borderTopColor: "#8b949e" }} />
+            <span className="inline-block w-3.5 h-3.5 border-2 rounded-full animate-spin" style={{ borderColor: "#2c2c35", borderTopColor: "#8b949e" }} />
             Loading code…
           </div>
         ) : state.status === "error" ? (

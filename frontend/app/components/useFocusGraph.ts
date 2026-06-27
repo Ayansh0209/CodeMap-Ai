@@ -221,6 +221,13 @@ export function useFocusGraph({
       .attr("viewBox", `0 0 ${width} ${height}`).style("opacity", "0");
     svgRef.current = svg;
 
+    // Click on empty focus canvas clears the selected file (closes the details
+    // panel) WITHOUT leaving focus mode — mirrors the main graph's behaviour.
+    svg.on("click", (ev) => {
+      const target = ev.target as Element;
+      if (!target.closest(".focus-node")) onFileClickRef.current(null);
+    });
+
     const defs = svg.append("defs");
     const mk = (id: string, fill: string) => defs.append("marker").attr("id", id)
       .attr("viewBox", "0 -5 10 10").attr("refX", 7).attr("refY", 0)
@@ -246,8 +253,8 @@ export function useFocusGraph({
     svg.call(zoom);
 
     const tooltip = d3.select(container).append("div")
-      .style("position", "absolute").style("background", "rgba(13,17,23,0.95)")
-      .style("border", "1px solid #30363d").style("border-radius", "8px")
+      .style("position", "absolute").style("background", "rgba(16,16,20,0.95)")
+      .style("border", "1px solid #2c2c35").style("border-radius", "8px")
       .style("padding", "8px 12px").style("font-size", "12px").style("color", "#e6edf3")
       .style("pointer-events", "none").style("opacity", "0").style("z-index", "100");
 
@@ -293,6 +300,7 @@ export function useFocusGraph({
 
     // ── Nodes ─────────────────────────────────────────────────────────────────
     const nodeG = g.append("g").selectAll<SVGGElement, SimNode>("g").data(allNodes).join("g")
+      .attr("class", "focus-node")
       .attr("transform", d => `translate(${d.x}, ${d.y})`).style("cursor", "pointer");
 
     nodeG.each(function (d) {
@@ -308,8 +316,8 @@ export function useFocusGraph({
         sel.append("circle").attr("r", r + 4).attr("fill", "none").attr("stroke", CYCLE_C).attr("stroke-opacity", 0.8).attr("stroke-width", 1).attr("stroke-dasharray", "3 2");
       }
       sel.append("circle").attr("class", "fdot").attr("r", r)
-        .attr("fill", isFocus ? "#f0883e" : d.isGroup ? "#30363d" : representativeFilesSet.has(d.id) ? "#22c55e" : getLanguageColor(d.data.language))
-        .attr("stroke", isFocus ? "#f0883e" : "#0d1117").attr("stroke-width", 1.5);
+        .attr("fill", isFocus ? "#f0883e" : d.isGroup ? "#2c2c35" : representativeFilesSet.has(d.id) ? "#22c55e" : getLanguageColor(d.data.language))
+        .attr("stroke", isFocus ? "#f0883e" : "#101014").attr("stroke-width", 1.5);
       if (d.isGroup) sel.append("text").attr("text-anchor", "middle").attr("dy", "0.32em").attr("font-size", "9px").text("📁");
 
       // label beside the dot (outward), with optional dim folder path

@@ -1,6 +1,6 @@
 // All API calls go through here, nowhere else
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 // ── Re-export all types from the centralized types file ───────────────────────
 export type {

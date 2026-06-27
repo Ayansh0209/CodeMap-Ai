@@ -109,7 +109,7 @@ export default function FunctionGraph({
       {/* ── Top bar: Back + Breadcrumb ────────────────────────────────────── */}
       <div
         className="flex items-center gap-3 px-2 py-2 flex-wrap shrink-0"
-        style={{ borderBottom: "1px solid #21262d" }}
+        style={{ borderBottom: "1px solid #23232a" }}
       >
         {/* Back buttons */}
         <div className="flex items-center gap-2">
@@ -117,7 +117,7 @@ export default function FunctionGraph({
             id="back-to-file-graph-btn"
             onClick={onBackToFileGraph}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-            style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+            style={{ background: "#1e1e25", border: "1px solid #2c2c35", color: "#8b949e" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -129,7 +129,7 @@ export default function FunctionGraph({
               id="back-to-file-btn"
               onClick={onBackToFile}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors hover:opacity-80"
-              style={{ background: "#1c2128", border: "1px solid #30363d", color: "#8b949e" }}
+              style={{ background: "#1e1e25", border: "1px solid #2c2c35", color: "#8b949e" }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -214,12 +214,12 @@ export default function FunctionGraph({
 
           {/* Caller pagination */}
           {callerTotalPages > 1 && (
-            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #21262d" }}>
+            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #23232a" }}>
               <button
                 onClick={() => setCallerPage(p => Math.max(0, p - 1))}
                 disabled={callerPage === 0}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 ← Prev
               </button>
@@ -230,7 +230,7 @@ export default function FunctionGraph({
                 onClick={() => setCallerPage(p => Math.min(callerTotalPages - 1, p + 1))}
                 disabled={callerPage >= callerTotalPages - 1}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 Next →
               </button>
@@ -256,7 +256,7 @@ export default function FunctionGraph({
             style={{
               minWidth: "220px",
               maxWidth: "100%",
-              background: "#1c2128",
+              background: "#1e1e25",
               border: "2px solid #f0883e",
               boxShadow: "0 0 20px rgba(240,136,62,0.15)",
             }}
@@ -357,8 +357,8 @@ export default function FunctionGraph({
               rel="noopener noreferrer"
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
               style={{
-                background: "#1c2128",
-                border: "1px solid #30363d",
+                background: "#1e1e25",
+                border: "1px solid #2c2c35",
                 color: "#e6edf3",
               }}
             >
@@ -379,8 +379,8 @@ export default function FunctionGraph({
               onClick={() => setShowCode((v) => !v)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium transition-colors hover:opacity-90"
               style={{
-                background: showCode ? "rgba(88,166,255,0.12)" : "#1c2128",
-                border: `1px solid ${showCode ? "rgba(88,166,255,0.4)" : "#30363d"}`,
+                background: showCode ? "rgba(88,166,255,0.12)" : "#1e1e25",
+                border: `1px solid ${showCode ? "rgba(88,166,255,0.4)" : "#2c2c35"}`,
                 color: showCode ? "#58a6ff" : "#e6edf3",
               }}
             >
@@ -452,12 +452,12 @@ export default function FunctionGraph({
 
           {/* Callee pagination */}
           {calleeTotalPages > 1 && (
-            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #21262d" }}>
+            <div className="flex items-center justify-between pt-3 mt-2 shrink-0" style={{ borderTop: "1px solid #23232a" }}>
               <button
                 onClick={() => setCalleePage(p => Math.max(0, p - 1))}
                 disabled={calleePage === 0}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 ← Prev
               </button>
@@ -468,7 +468,7 @@ export default function FunctionGraph({
                 onClick={() => setCalleePage(p => Math.min(calleeTotalPages - 1, p + 1))}
                 disabled={calleePage >= calleeTotalPages - 1}
                 className="text-[11px] px-2.5 py-1 rounded-lg transition-colors disabled:opacity-30"
-                style={{ background: "#161b22", border: "1px solid #30363d", color: "#8b949e" }}
+                style={{ background: "#17171d", border: "1px solid #2c2c35", color: "#8b949e" }}
               >
                 Next →
               </button>
@@ -498,7 +498,7 @@ function FunctionCard({
     <button
       className="w-full text-left rounded-xl p-3 transition-all hover:scale-[1.02]"
       style={{
-        background: "#161b22",
+        background: "#17171d",
         border: `1px solid ${borderColor}`,
         borderLeftWidth: "3px",
       }}
@@ -568,8 +568,8 @@ function EmptyState({ children }: { children: React.ReactNode }) {
     <div
       className="rounded-xl p-4 text-center text-sm italic"
       style={{
-        background: "#161b22",
-        border: "1px dashed #30363d",
+        background: "#17171d",
+        border: "1px dashed #2c2c35",
         color: "#484f58",
       }}
     >

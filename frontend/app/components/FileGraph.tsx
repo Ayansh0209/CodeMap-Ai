@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, memo, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, memo, useMemo } from "react";
 import * as d3 from "d3";
 import dagre from "dagre";
 import type { FileNodeDTO, ImportEdgeDTO, RepoModuleDTO } from "../lib/types";
-import { getLanguageColor, getFolderGroup } from "../lib/graphHelpers";
+import { getLanguageColor, getLanguageLabel, getFolderGroup } from "../lib/graphHelpers";
 import { SimNode, SimLink, getRadius, trunc, brightenColor } from "./graphTypes";
 
 interface FileGraphProps {
@@ -59,8 +59,16 @@ function FileGraph({
   const onFileClickRef = useRef(onFileClick);
   const selectedFileIdRef = useRef(selectedFileId);
   const [error, setError] = useState<string | null>(null);
+  const [graphLoading, setGraphLoading] = useState(false);
   const [isLegendOpen, setIsLegendOpen] = useState(true);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+
+  // Distinct languages actually present (most-common first) for the dynamic legend.
+  const presentLanguages = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const f of files) counts.set(f.language || "unknown", (counts.get(f.language || "unknown") || 0) + 1);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([lang]) => lang);
+  }, [files]);
   const allFilesRef = useRef(files);
   const allEdgesRef = useRef(edges);
   useEffect(() => { allFilesRef.current = files; allEdgesRef.current = edges; }, [files, edges]);
@@ -101,7 +109,7 @@ function FileGraph({
     nodeGRef.current.selectAll<SVGCircleElement, SimNode>(".node-circle")
       .attr("fill", d => {
         if (representativeFilesSet.has(d.id)) return "#22c55e";
-        if (d.data.isDeadCode) return "#30363d";
+        if (d.data.isDeadCode) return "#2c2c35";
         return d.isHub ? brightenColor(getLanguageColor(d.data.language)) : getLanguageColor(d.data.language);
       });
 
@@ -191,9 +199,26 @@ function FileGraph({
     }
   }, [selectedFileId, representativeFilesSet]);
 
+  // Flip the loader ON before paint — useLayoutEffect runs pre-paint, so the
+  // spinner is visible the frame BEFORE the synchronous build below freezes the
+  // thread. The build (a post-paint useEffect) turns it OFF when it's done, so
+  // the build's own timing/layout stays completely unchanged. Gated to big graphs
+  // only; small ones lay out instantly and a loader would just flicker.
+  useLayoutEffect(() => {
+    if (files.length > 400) setGraphLoading(true);
+  }, [files, edges, representativeFilesSet]);
+
   // ── Main graph build ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!mainContainerRef.current || files.length === 0) return;
+    if (!mainContainerRef.current) { setGraphLoading(false); return; }
+
+    // Filtered down to nothing — clear the canvas instead of leaving stale nodes.
+    if (files.length === 0) {
+      simulationRef.current?.stop();
+      d3.select(mainContainerRef.current).selectAll("*").remove();
+      setGraphLoading(false);
+      return;
+    }
 
     // Cache check: only rebuild if files/edges actually changed
     const dataChanged = lastFilesRef.current !== files || lastEdgesRef.current !== edges;
@@ -204,6 +229,7 @@ function FileGraph({
       // Restore logic: if we just came back from focus mode, the graph is already in mainContainerRef
       // Stop simulation if entering focus mode
       if (focusedNodeId) simulationRef.current?.stop();
+      setGraphLoading(false);
       return;
     }
 
@@ -361,7 +387,12 @@ function FileGraph({
         .attr("viewBox", `0 0 ${width} ${height}`)
         .attr("preserveAspectRatio", "xMidYMid meet")
         .on("click", (ev) => {
-          if (ev.target.tagName === "svg" || ev.target.tagName === "rect") {
+          // Clear the selection whenever the click isn't on a node — empty
+          // canvas, an edge, or a label. (Previously only a literal <svg>/<rect>
+          // target cleared it, so clicking an edge/label — or the canvas right
+          // after exiting the focus graph — left the panel stuck open.)
+          const target = ev.target as Element;
+          if (!target.closest(".file-node")) {
             onFileClickRef.current(null);
           }
         });
@@ -370,10 +401,15 @@ function FileGraph({
       const defs = svg.append("defs");
       // refX 8 + per-tick endpoint shortening = arrowheads always sit exactly
       // at the node's edge, whatever its radius (was refX 22 — arrows were
-      // buried inside big nodes and floating outside small ones)
+      // buried inside big nodes and floating outside small ones).
+      // markerUnits="userSpaceOnUse" pins the arrowhead to a FIXED pixel size —
+      // without it, SVG scales the marker by the line's stroke-width, so a
+      // heavy edge (e.g. a barrel re-export with a high symbol weight) renders
+      // a giant cone instead of a small arrow.
       for (const [id, col] of [["default", "#3d444d"], ["highlight", "#58a6ff"]] as [string, string][]) {
         defs.append("marker").attr("id", `arrow-${id}`).attr("viewBox", "0 -5 10 10")
-          .attr("refX", 8).attr("refY", 0).attr("markerWidth", 6).attr("markerHeight", 6).attr("orient", "auto")
+          .attr("refX", 8).attr("refY", 0).attr("markerWidth", 11).attr("markerHeight", 11)
+          .attr("markerUnits", "userSpaceOnUse").attr("orient", "auto")
           .append("path").attr("d", "M0,-4L10,0L0,4").attr("fill", col);
       }
       // Hub glow filter
@@ -421,16 +457,16 @@ function FileGraph({
 
 
       const tooltip = d3.select(container).append("div")
-        .style("position", "absolute").style("background", "rgba(13,17,23,0.95)")
-        .style("border", "1px solid #30363d").style("border-radius", "8px")
+        .style("position", "absolute").style("background", "rgba(16,16,20,0.95)")
+        .style("border", "1px solid #2c2c35").style("border-radius", "8px")
         .style("padding", "8px 12px").style("font-size", "12px").style("color", "#e6edf3")
         .style("pointer-events", "none").style("opacity", "0").style("max-width", "260px").style("z-index", "100");
 
       // 5. Edges
       const link = g.append("g")
         .selectAll<SVGLineElement, SimLink>("line").data(links).join("line")
-        .attr("stroke", d => d.data.isGhost ? "#6e7681" : d.data.isCircular ? "#f85149" : d.data.isTypeOnly ? "#1c2128" : "#2d333b")
-        .attr("stroke-width", d => d.data.isGhost ? 1 : d.data.isTypeOnly ? 0.5 : Math.max(1, (d.data.weight || 1) * 0.8))
+        .attr("stroke", d => d.data.isGhost ? "#6e7681" : d.data.isCircular ? "#f85149" : d.data.isTypeOnly ? "#1e1e25" : "#2d333b")
+        .attr("stroke-width", d => d.data.isGhost ? 1 : d.data.isTypeOnly ? 0.5 : Math.min(3, Math.max(1, (d.data.weight || 1) * 0.8)))
         .attr("stroke-dasharray", d => d.data.isGhost ? "2,6" : d.data.isCircular ? "6,4" : d.data.kind === "dynamic" ? "5,3" : "none")
         .attr("stroke-opacity", d => d.data.isGhost ? 0.5 : d.data.isCircular ? 1 : 0.7)
         .attr("marker-end", d => d.data.isGhost ? null : "url(#arrow-default)");
@@ -439,6 +475,7 @@ function FileGraph({
       // 6. Nodes
       const nodeG = g.append("g")
         .selectAll<SVGGElement, SimNode>("g").data(nodes).join("g")
+        .attr("class", "file-node")
         .style("cursor", "pointer")
         .call(d3.drag<SVGGElement, SimNode>()
           .on("start", (_ev, d) => { d.fx = d.x; d.fy = d.y; })
@@ -522,7 +559,7 @@ function FileGraph({
           const conn = new Set([d.id]);
           links.forEach(l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; if (s === d.id) conn.add(t); if (t === d.id) conn.add(s); });
           nodeG.attr("opacity", n => conn.has(n.id) ? 1 : 0.06);
-          link.attr("stroke", l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; return l.data.isCircular ? "#f85149" : (s === d.id || t === d.id ? "#58a6ff" : "#1c2128"); })
+          link.attr("stroke", l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; return l.data.isCircular ? "#f85149" : (s === d.id || t === d.id ? "#58a6ff" : "#1e1e25"); })
             .attr("stroke-opacity", l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; return s === d.id || t === d.id ? 1 : 0.03; })
             .attr("marker-end", l => { const s = (l.source as SimNode).id, t = (l.target as SimNode).id; return s === d.id || t === d.id ? "url(#arrow-highlight)" : "url(#arrow-default)"; });
           tooltip.style("opacity", "1")
@@ -538,7 +575,7 @@ function FileGraph({
             if (focusMode && highlightedIssueFiles.size > 0 && !highlightedIssueFiles.has(n.id)) return 0.15;
             return 1;
           });
-          link.attr("stroke", l => l.data.isCircular ? "#f85149" : l.data.isTypeOnly ? "#1c2128" : "#252c36").attr("stroke-opacity", (l: SimLink) => {
+          link.attr("stroke", l => l.data.isCircular ? "#f85149" : l.data.isTypeOnly ? "#1e1e25" : "#252c36").attr("stroke-opacity", (l: SimLink) => {
             const s = (l.source as SimNode).id, t = (l.target as SimNode).id;
             if (filteredNodeIds && (!filteredNodeIds.has(s) || !filteredNodeIds.has(t))) return 0;
             if (focusMode && highlightedIssueFiles.size > 0) return 0.05;
@@ -617,6 +654,10 @@ function FileGraph({
       setError(msg);
     }
 
+    // Graph is laid out and statically painted — drop the loader. (The force sim
+    // keeps refining positions after this; that's just the entrance animation.)
+    setGraphLoading(false);
+
     return () => { simulationRef.current?.stop(); };
   }, [files, edges, representativeFilesSet]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -686,7 +727,7 @@ function FileGraph({
         />
       )}
       <div className="absolute bottom-4 left-4 z-10 border rounded-xl overflow-hidden flex flex-col pointer-events-auto"
-        style={{ background: "rgba(13,17,23,0.92)", borderColor: "#30363d" }}>
+        style={{ background: "rgba(16,16,20,0.92)", borderColor: "#2c2c35" }}>
 
         <button
           onClick={() => setIsLegendOpen(!isLegendOpen)}
@@ -699,12 +740,11 @@ function FileGraph({
         </button>
 
         {isLegendOpen && (
-          <div className="px-3 pb-3 text-xs space-y-1.5 border-t" style={{ borderColor: "#30363d" }}>
-            {[{ color: "#3178c6", label: "TypeScript" }, { color: "#e8a400", label: "JavaScript" },
-            { color: "#7c3aed", label: "TSX" }, { color: "#ea580c", label: "JSX" }].map(({ color, label }) => (
-              <div key={label} className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: color }} />
-                <span style={{ color: "#e6edf3" }}>{label}</span>
+          <div className="px-3 pb-3 text-xs space-y-1.5 border-t" style={{ borderColor: "#2c2c35" }}>
+            {presentLanguages.map((lang) => (
+              <div key={lang} className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: getLanguageColor(lang) }} />
+                <span style={{ color: "#e6edf3" }}>{getLanguageLabel(lang)}</span>
               </div>
             ))}
             <div className="flex items-center gap-2 mt-1"><span className="w-3 h-3 rounded-full" style={{ background: "#22c55e" }} /><span style={{ color: "#e6edf3" }}>Core File</span></div>
@@ -713,7 +753,7 @@ function FileGraph({
             <div className="flex items-center gap-2"><span className="w-3 h-0.5" style={{ borderTop: "2px dotted #6e7681" }} /><span style={{ color: "#e6edf3" }}>Via hidden files</span></div>
             <div className="flex items-center gap-2"><svg width="12" height="12" viewBox="0 0 20 20"><path d="M10 0L20 10L10 20L0 10Z" fill="#6b7280" /></svg><span style={{ color: "#e6edf3" }}>Config</span></div>
             <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full border border-dashed" style={{ borderColor: "#f85149", opacity: 0.5 }} /><span style={{ color: "#e6edf3" }}>Dead Code</span></div>
-            <div className="flex items-center gap-2 pt-1" style={{ borderTop: "1px solid #30363d", marginTop: "4px" }}>
+            <div className="flex items-center gap-2 pt-1" style={{ borderTop: "1px solid #2c2c35", marginTop: "4px" }}>
               <span className="w-3 h-0.5 rounded" style={{ background: "#f0883e" }} /><span style={{ color: "#e6edf3" }}>Selected</span>
             </div>
             <div className="flex items-center gap-2">
@@ -730,12 +770,29 @@ function FileGraph({
           </div>
         </div>
       )}
+      {/* Laying-out overlay — painted (pre-paint) before the synchronous build
+          freezes the thread, cleared once the graph is laid out. */}
+      {graphLoading && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl" style={{ background: "rgba(16,16,20,0.85)", border: "1px solid #2c2c35" }}>
+            <span className="inline-block w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "#fb7a3c", borderTopColor: "transparent" }} />
+            <span className="text-sm" style={{ color: "#e6edf3" }}>Laying out graph…</span>
+          </div>
+        </div>
+      )}
+      {/* Empty state — filters matched nothing */}
+      {files.length === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-10 pointer-events-none text-center">
+          <p className="text-sm font-medium" style={{ color: "#e6edf3" }}>No files match these filters</p>
+          <p className="text-xs mt-1" style={{ color: "#8b949e" }}>Try clearing or changing the filters.</p>
+        </div>
+      )}
       {/* Main Graph Container */}
       <div
         ref={mainContainerRef}
         className="w-full h-full overflow-hidden"
         style={{
-          background: "#0d1117",
+          background: "#101014",
           display: focusedNodeId ? "none" : "block"
         }}
       />
@@ -745,7 +802,7 @@ function FileGraph({
         <div
           ref={focusContainerRef}
           className="w-full h-full overflow-hidden absolute inset-0 z-0"
-          style={{ background: "#0d1117" }}
+          style={{ background: "#101014" }}
         />
       )}
     </div>

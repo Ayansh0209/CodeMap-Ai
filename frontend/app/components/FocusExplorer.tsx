@@ -48,7 +48,7 @@ export default function FocusExplorer({
           className="px-3 py-2 rounded-lg text-xs font-medium"
           style={{
             background: "rgba(48,54,61,0.5)",
-            border: "1px solid #30363d",
+            border: "1px solid #2c2c35",
             color: "#e6edf3",
             backdropFilter: "blur(8px)",
           }}
@@ -58,7 +58,7 @@ export default function FocusExplorer({
       </div>
 
       <div
-        className="absolute z-20 flex flex-col gap-2 p-3 rounded-xl border border-[#30363d] backdrop-blur-md bg-[#0d1117]/80 w-64 shadow-2xl transition-all"
+        className="absolute z-20 flex flex-col gap-2 p-3 rounded-xl border border-[#2c2c35] backdrop-blur-md bg-[#101014]/80 w-64 shadow-2xl transition-all"
         style={{
           top: '20px',
           right: '20px',
@@ -82,18 +82,18 @@ export default function FocusExplorer({
                 <label className="text-[10px] text-[#8b949e] font-semibold">Graph Depth</label>
                 <span className="text-[9px] text-[#f0883e] font-bold px-1.5 py-0.5 rounded bg-[#f0883e]/10 border border-[#f0883e]/20">{focusDepth}-Hop</span>
               </div>
-              <div className="flex gap-1 p-0.5 bg-[#161b22] rounded-lg border border-[#30363d]">
+              <div className="flex gap-1 p-0.5 bg-[#17171d] rounded-lg border border-[#2c2c35]">
                 <button
                   onClick={() => setFocusDepth(1)}
-                  className={`flex-1 py-1 text-[10px] rounded-md transition-all ${focusDepth === 1 ? 'bg-[#30363d] text-white shadow-sm font-bold' : 'text-[#8b949e] hover:text-white'}`}
+                  className={`flex-1 py-1 text-[10px] rounded-md transition-all ${focusDepth === 1 ? 'bg-[#2c2c35] text-white shadow-sm font-bold' : 'text-[#8b949e] hover:text-white'}`}
                 >1-Hop</button>
                 <button
                   onClick={() => setFocusDepth(2)}
-                  className={`flex-1 py-1 text-[10px] rounded-md transition-all ${focusDepth === 2 ? 'bg-[#30363d] text-white shadow-sm font-bold' : 'text-[#8b949e] hover:text-white'}`}
+                  className={`flex-1 py-1 text-[10px] rounded-md transition-all ${focusDepth === 2 ? 'bg-[#2c2c35] text-white shadow-sm font-bold' : 'text-[#8b949e] hover:text-white'}`}
                 >2-Hop</button>
                 <button
                   onClick={() => setFocusDepth('all')}
-                  className={`flex-1 py-1 text-[10px] rounded-md transition-all ${focusDepth === 'all' ? 'bg-[#30363d] text-white shadow-sm font-bold' : 'text-[#8b949e] hover:text-white'}`}
+                  className={`flex-1 py-1 text-[10px] rounded-md transition-all ${focusDepth === 'all' ? 'bg-[#2c2c35] text-white shadow-sm font-bold' : 'text-[#8b949e] hover:text-white'}`}
                 >All</button>
               </div>
             </div>
@@ -106,7 +106,7 @@ export default function FocusExplorer({
                   placeholder="Filter files/folders..."
                   value={focusSearch}
                   onChange={(e) => setFocusSearch(e.target.value)}
-                  className="w-full bg-[#161b22] border border-[#30363d] rounded-lg pl-2 pr-7 py-1.5 text-[11px] text-[#e6edf3] focus:outline-none focus:border-[#f0883e]/50 transition-all placeholder:text-[#484f58]"
+                  className="w-full bg-[#17171d] border border-[#2c2c35] rounded-lg pl-2 pr-7 py-1.5 text-[11px] text-[#e6edf3] focus:outline-none focus:border-[#f0883e]/50 transition-all placeholder:text-[#484f58]"
                 />
                 {focusSearch && (
                   <button
@@ -117,9 +117,9 @@ export default function FocusExplorer({
               </div>
             </div>
 
-            <div className="pt-2 border-t border-[#30363d] flex flex-col gap-1.5">
+            <div className="pt-2 border-t border-[#2c2c35] flex flex-col gap-1.5">
               <div className="flex items-center gap-2 text-[10px] text-[#8b949e]">
-                <span className="w-2 h-2 rounded-full bg-[#30363d] border border-[#484f58] flex items-center justify-center text-[6px]">📁</span>
+                <span className="w-2 h-2 rounded-full bg-[#2c2c35] border border-[#484f58] flex items-center justify-center text-[6px]">📁</span>
                 <span>Click group to expand</span>
               </div>
               <div className="flex items-center gap-2 text-[10px] text-[#8b949e]">
