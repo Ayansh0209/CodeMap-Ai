@@ -233,8 +233,7 @@ export default function Home() {
           className="text-muted/60 text-center text-sm max-w-md mb-10 animate-fade-in-up"
           style={{ "--delay": "0.4s" } as React.CSSProperties}
         >
-          File dependencies · Function calls · Architecture — all
-          deterministic, no AI guessing.
+          File dependencies · Function calls · Architecture · Issue mapping.
         </p>
 
         {/* Input */}
@@ -277,6 +276,44 @@ export default function Home() {
                 CodeMap turns an unfamiliar repo into a map you can actually see —
                 so you find the right file in seconds, not an afternoon.
               </p>
+            </div>
+          </section>
+
+          {/* ── Issue Mapper spotlight (lead feature) ─────────────────────── */}
+          <section className="max-w-5xl mx-auto px-6 pb-20 w-full">
+            <div className="rounded-3xl border border-border bg-surface/50 p-8 md:p-12 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
+                  Issue Mapper
+                </p>
+                <h3 className="text-2xl font-bold text-foreground mb-4 tracking-tight">
+                  Don&apos;t browse 100 files.
+                  <br />
+                  Start with the right one.
+                </h3>
+                <p className="text-muted leading-relaxed mb-4">
+                  Picked up your first &quot;good first issue&quot; and have
+                  no idea which file to open? Paste the issue URL. We walk the
+                  dependency graph, rank the files most likely to be involved,
+                  and give you a confidence score for each — so you start
+                  fixing code instead of hunting for it.
+                </p>
+                <ul className="space-y-2 text-sm text-muted/80">
+                  <li className="flex items-start gap-2">
+                    <span className="text-primary mt-0.5">→</span>
+                    Traces the issue text against your real import &amp; call graph
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-primary mt-0.5">→</span>
+                    Falls back to AI ranking when the graph alone isn&apos;t conclusive
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="text-primary mt-0.5">→</span>
+                    Caches results, so a repeat lookup is instant
+                  </li>
+                </ul>
+              </div>
+              <IssueMapperDemo />
             </div>
           </section>
 
@@ -370,44 +407,6 @@ export default function Home() {
             </div>
           </section>
 
-          {/* ── Issue Mapper spotlight ────────────────────────────────────── */}
-          <section className="max-w-5xl mx-auto px-6 pb-20 w-full">
-            <div className="rounded-3xl border border-border bg-surface/50 p-8 md:p-12 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-primary mb-3">
-                  Issue Mapper
-                </p>
-                <h3 className="text-2xl font-bold text-foreground mb-4 tracking-tight">
-                  Don&apos;t browse 100 files.
-                  <br />
-                  Start with the right one.
-                </h3>
-                <p className="text-muted leading-relaxed mb-4">
-                  Picked up your first &quot;good first issue&quot; and have
-                  no idea which file to open? Paste the issue URL. We walk the
-                  dependency graph, rank the files most likely to be involved,
-                  and give you a confidence score for each — so you start
-                  fixing code instead of hunting for it.
-                </p>
-                <ul className="space-y-2 text-sm text-muted/80">
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary mt-0.5">→</span>
-                    Traces the issue text against your real import &amp; call graph
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary mt-0.5">→</span>
-                    Falls back to AI ranking when the graph alone isn&apos;t conclusive
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary mt-0.5">→</span>
-                    Caches results, so a repeat lookup is instant
-                  </li>
-                </ul>
-              </div>
-              <IssueMapperDemo />
-            </div>
-          </section>
-
           {/* ── Fix-flow spotlight: issue → exact lines (the whole story) ─── */}
           <section className="max-w-5xl mx-auto px-6 pb-20 w-full">
             <div className="rounded-3xl border border-border bg-surface/50 p-8 md:p-12 grid grid-cols-1 md:grid-cols-2 gap-10 items-center">
@@ -461,12 +460,13 @@ export default function Home() {
           <section className="max-w-2xl mx-auto px-6 pb-20 w-full">
             <div className="rounded-2xl border border-border bg-surface/50 p-8 text-center">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted/60 mb-4">
-                A note from the person building this
+                I made this because
               </p>
               <p className="text-muted leading-relaxed mb-4">
-                I built CodeMap AI because I remember staring at a huge
-                unfamiliar repo as a beginner, wanting to contribute, and not
-                knowing where to even start. If this idea is useful to you
+                I still remember staring at a huge unfamiliar repo as a
+                beginner, wanting to contribute — but wasting so much time just
+                trying to understand the codebase before I could even start
+                solving a single issue. If this idea is useful to you
                 too, I&apos;d love to hear about it — what&apos;s confusing,
                 what&apos;s missing, what would make this an easier on-ramp
                 into open source.
