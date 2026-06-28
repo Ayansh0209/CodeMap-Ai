@@ -40,7 +40,7 @@ If you find the project useful, consider starring the repository ⭐
 
 ## What it does
 
-You paste a GitHub repo URL and get an interactive map(graph) of that codebase: real file dependencies, function-level call graphs, and a clear architectural overview. The core parser uses the TypeScript compiler API (ts-morph) to extract import relationships and function call chains without hallucination.
+You paste a GitHub repo URL and get an interactive map(graph) of that codebase: real file dependencies, function-level call graphs, and a clear architectural overview. The core parser uses ts-morph for JS/TS and tree-sitter for Python, Go, C, and C++ to extract import relationships and function call chains without hallucination.
 ### Visual Preview
 
 Here’s a sneak peek at what CodeMap AI gives you:
@@ -70,32 +70,48 @@ The files affected or need change for a particlaur issue and by using ai chat yo
 
 ## What has been done so far
 
-- Deterministic graph extraction for JS/TS (including JSX/TSX)
+- Deterministic graph extraction for JS/TS (including JSX/TSX) via ts-morph
+- Deterministic graph extraction for Python, Go, C, and C++ via web-tree-sitter (WASM)
 - GitHub tarball download and safe extraction
-- Redis-backed caching and queue processing
-- Issue mapping with deterministic results plus optional AI augmentation
-- Frontend UI for graph exploration and chat
+- BullMQ-based job queue with Redis for background repo analysis
+- S3-compatible object storage (Backblaze B2 / Cloudflare R2 / Supabase / etc.) for large artifact persistence
+- Redis caching with gzipped fallback when object storage is not configured
+- Issue mapping with deterministic results plus optional Gemini AI augmentation
+- AI chat grounded in actual repository code via graph-guided retrieval
+- Frontend UI for graph exploration, issue mapping, and chat
 
 ## How it works (short version)
 
 1. Backend downloads the GitHub repo tarball and extracts it locally.
-2. The parser builds normalized graphs from the real source tree.
-3. Results are cached in Redis and served via API endpoints.
+2. A BullMQ worker parses the source tree using ts-morph (JS/TS) or web-tree-sitter (Python/Go/C/C++).
+3. Parsed graphs and function data are stored in S3-compatible object storage (or gzipped Redis fallback).
 4. The frontend renders file and function graphs with search and filters.
-5. AI adds explanation and issue analysis on top of the real data.
+5. Gemini AI adds explanation, issue analysis, and chat on top of the real data.
 
-## Project structure
+## Tech stack
 
-- backend: Express API, parser, queue worker, Redis cache
-- frontend: Next.js UI for graphs, issue mapping, and chat
+| Layer | Technology |
+|---|---|
+| **Backend API** | Express 5, TypeScript |
+| **Job Queue** | BullMQ (Redis-backed) |
+| **JS/TS Parser** | ts-morph (TypeScript Compiler API) |
+| **Multi-lang Parser** | web-tree-sitter (WASM) — Python, Go, C, C++ |
+| **Object Storage** | Any S3-compatible provider (Backblaze B2, Cloudflare R2, Supabase, Storj, Wasabi, MinIO) |
+| **Cache / Queue Store** | Redis (ioredis) |
+| **AI** | Gemini API / Google Vertex AI |
+| **Frontend** | Next.js 16, React 19, Tailwind CSS 4 |
+| **Graph Rendering** | D3.js, Dagre |
+| **Syntax Highlighting** | highlight.js |
 
 ## Getting started
 
 ### Prerequisites
 
-- Node.js 18+ (recommended)
-- Redis (local or hosted)
+- Node.js 20+ (recommended)
+- Redis (local or hosted — used for BullMQ queue and caching)
 - GitHub Personal Access Token (for repo download)
+- *(Optional)* S3-compatible object storage credentials (Backblaze B2, Cloudflare R2, etc.) — falls back to gzipped Redis without it
+- *(Optional)* Gemini API key for AI chat and issue mapping
 
 ### Install
 
@@ -140,28 +156,74 @@ Backend: http://localhost:5000
 
 ## Configuration
 
-All config lives in backend/.env.
+All config lives in `backend/.env` — see `backend/.env.example` for the full template.
 
-Required:
+### Required
 
-- REDIS_URL: Redis connection string
-- GITHUB_TOKEN: GitHub token used for tarball downloads
-- PORT: API server port (default: 5000)
-- MAX_CONCURRENT_JOBS: worker concurrency (default: 3)
-- MAX_QUEUE_SIZE: queue backpressure limit (default: 100)
-- JOB_TIMEOUT_MS: per-job timeout in ms (default: 600000)
-- GEMINI_API_KEY: enables AI issue mapping and chat
-- R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_URL: reserved for future object storage support
+| Variable | Description |
+|---|---|
+| `REDIS_URL` | Redis connection string |
+| `GITHUB_TOKEN` | GitHub token for tarball downloads |
+| `PORT` | API server port (default: 5000) |
+
+### Object Storage (recommended for production)
+
+Works with **any S3-compatible provider** — set credentials + bucket + endpoint. Without this, artifacts are stored gzipped in Redis (fine for local dev).
+
+| Variable | Description |
+|---|---|
+| `R2_ACCESS_KEY_ID` | S3 access key |
+| `R2_SECRET_ACCESS_KEY` | S3 secret key |
+| `R2_BUCKET_NAME` | Bucket name |
+| `R2_ENDPOINT` | S3 endpoint URL (for B2, Supabase, Storj, Wasabi) |
+| `R2_REGION` | Region (blank = "auto" for R2; B2/Supabase need a real region) |
+| `R2_ACCOUNT_ID` | Cloudflare R2 only (alternative to R2_ENDPOINT) |
+
+### AI (optional)
+
+| Variable | Description |
+|---|---|
+| `GEMINI_API_KEY` | Enables AI issue mapping and chat |
+| `GCP_PROJECT_ID` | Google Cloud project (for Vertex AI) |
+| `GCP_LOCATION` | GCP region (default: us-central1) |
+
+### Queue tuning (safe defaults)
+
+| Variable | Default | Description |
+|---|---|---|
+| `MAX_CONCURRENT_JOBS` | 1 | Worker concurrency |
+| `MAX_QUEUE_SIZE` | 100 | Queue backpressure limit |
+| `JOB_TIMEOUT_MS` | 600000 | Per-job timeout (ms) |
+| `ARTIFACT_TTL_SECONDS` | 604800 | Redis artifact cache TTL (7 days) |
+| `RESULT_TTL_SECONDS` | 604800 | Cached result TTL by SHA (7 days) |
 
 ## Current language support
 
-- JavaScript and TypeScript, including JSX and TSX
+### JavaScript / TypeScript (via ts-morph)
+- JavaScript (`.js`, `.mjs`, `.cjs`) and TypeScript (`.ts`)
+- JSX (`.jsx`) and TSX (`.tsx`)
 - CommonJS and ES modules
 
-## Future feature 
+### Python (via tree-sitter)
+- Python (`.py`)
+- Relative and absolute import resolution
+- Function and class method extraction
 
-- Python support via tree-sitter adapter
-- Go, Rust, and C++ adapters with the same normalized graph schema
+### Go (via tree-sitter)
+- Go (`.go`)
+- Package-based import resolution
+- Function and method extraction
+
+### C / C++ (via tree-sitter)
+- C (`.c`, `.h`) and C++ (`.cpp`, `.cc`, `.cxx`, `.c++`, `.hpp`, `.hh`, `.hxx`)
+- `#include` resolution for both quoted and angle-bracket includes
+- Smart `.h` header classification (parsed as C or C++ based on repo majority)
+- Function, method, and constructor extraction
+
+## Future features
+
+- Rust adapter with the same normalized graph schema
+- Java / Kotlin support
 - Monorepo workspace-aware import resolution across package boundaries
 - Folder-first view for repositories with more than 400 files
 - Pull request creation directly from the issue mapper workflow
